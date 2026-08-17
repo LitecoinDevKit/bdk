@@ -14,7 +14,8 @@ Locked review decisions, each with "how we'd know it broke" pointers:
 
 Longer context: [`PORTING.md`](../PORTING.md), [`MWEB_ARCHITECTURE.md`](MWEB_ARCHITECTURE.md),
 [`LTCSUITE_ALIGNMENT.md`](LTCSUITE_ALIGNMENT.md), [`LITECOIN_E2E.md`](LITECOIN_E2E.md),
-[`LITECOIN_CORE_BRIEFING.md`](LITECOIN_CORE_BRIEFING.md).
+[`LITECOIN_CORE_BRIEFING.md`](LITECOIN_CORE_BRIEFING.md),
+[`V24_REVIEW.md`](V24_REVIEW.md) (Core 24.0.1 pre-release vs BDK).
 
 Wallet-team onboarding (not reviewer narrative): [`ADOPTION.md`](ADOPTION.md),
 [`MIGRATE_FROM_MWEBD.md`](MIGRATE_FROM_MWEBD.md), [`INDEXING_NOTES.md`](INDEXING_NOTES.md).
@@ -80,7 +81,7 @@ Wallet-team onboarding (not reviewer narrative): [`ADOPTION.md`](ADOPTION.md),
 
 | Area | Reference | Stance |
 | --- | --- | --- |
-| Stealth / BlindSwitch | Litecoin Core 0.21 | Core paths + H prefix `0x0b` |
+| Stealth / BlindSwitch | Litecoin Core 0.21 (v24 paths unchanged) | Core paths + H prefix `0x0b`; v24 regtest HRP is `rmweb` — see [`V24_REVIEW.md`](V24_REVIEW.md) |
 | Bulletproofs / Schnorr | Core / `grin_secp256k1zkp` | Gate: Core peg-in proofs verify under FFI |
 | PSBTv2 MWEB | ltcd `ltcutil/psbt` | Key codes locked 2026-07-27; see alignment doc |
 | Sign path | ltcwallet `SignMwebComponents` | fund → sign → scrub → `extract_tx_with_mweb` |
