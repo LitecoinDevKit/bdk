@@ -129,7 +129,7 @@ which `bdk_mweb` uses only in the `persist_filestore` test.
 Previously ignored and now cleared: `RUSTSEC-2026-0098`/`0099` (rustls 0.21)
 and `RUSTSEC-2026-0104` (rustls-webpki 0.101) came in through `minreq` 2.x
 under `rust-esplora-client`. The fork moved to `minreq` 3 (rustls 0.23,
-webpki-roots 1.x) in `17ac6011`. `jsonrpc` 0.18 still requires `minreq` 2, but
+webpki-roots 1.x) in `ce5a859b`. `jsonrpc` 0.18 still requires `minreq` 2, but
 its `minreq_http` feature enables no TLS backend, so rustls 0.21 is no longer
 in the resolved graph at all. `rust-electrum-client` moved from
 `webpki-roots` 0.25 to 1.0.10 (`6ffa5afa`), mirroring upstream `ee435a0b`,
