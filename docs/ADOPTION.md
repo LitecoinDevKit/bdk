@@ -59,13 +59,16 @@ Update this table when cutting a release; mirror only by linking here.
 | --- | --- | --- |
 | `bdk-ffi` release / AAR / xcframework | **`3.1.0-litecoin.3`** | [GitHub release](https://github.com/LitecoinDevKit/bdk-ffi/releases/tag/3.1.0-litecoin.3); first binary on the post-merge ladder, rustls 0.21 gone |
 | `ltc-swift` (SwiftPM) | **`3.1.0-litecoin.3`** | Thin wrapper over the `.3` xcframework; binary and SwiftPM tags re-synced at `.3` (`.2` was a wrapper-only bump) |
-| `bdk_wallet` (Rust) | **`3.1.0-litecoin.0`** @ `f1307827` | Taint-aware `Wallet::balance`; TLS stack is a single rustls 0.23 (no rustls 0.21 / webpki-roots 0.25); pins this repo at `2deac37e` |
+| `bdk_wallet` (Rust) | **`3.2.0-litecoin.0`** @ `7618a092` | Merged upstream `bdk_wallet` 3.2.0 (`7f1ec9f9`): `Wallet::sign` / `extract_keys` / `TxBuilder::policy_path` deprecated in favour of caller-owned keys (`Psbt::sign` + `finalize_psbt`, `set_condition`); MWEB signing still goes through `Wallet::sign`. Taint-aware `Wallet::balance`; single rustls 0.23; pins this repo at `2deac37e` |
 | Core crates (`bdk`, `bdk_mweb`, …) | `2deac37e` (`litecoin`) | Merged `bitcoindevkit/bdk` `7b68d280`; esplora-client fork on minreq 3, electrum-client fork on webpki-roots 1.x. See [`PORTING.md`](../PORTING.md) topology and [`SUPPLY_CHAIN.md`](SUPPLY_CHAIN.md) |
 
-The `3.1.0-litecoin.3` mobile artifacts are built from `bdk-ffi` `ddf70619`, which pins exactly
-this pair: `bdk_wallet` `f1307827` and `bdk` `2deac37e` (see `scripts/check-rev-coherence.sh`).
-Rust git consumers should take the same two revs. The older `3.1.0-litecoin.1` artifacts pin the
-pre-merge `85eb2a99` ladder and still ship rustls 0.21; move off them.
+The `3.1.0-litecoin.3` mobile artifacts are built from `bdk-ffi` `ddf70619`, which pins
+`bdk_wallet` `f1307827` (`3.1.0-litecoin.0`) and `bdk` `2deac37e` (see
+`scripts/check-rev-coherence.sh`). They stay the blessed binaries until the next ladder cut;
+`bdk-ffi` `litecoin-mweb` and `ldk-wallet` `main` already pin `bdk_wallet` `7618a092`
+(`3.2.0-litecoin.0`), which keeps `bdk` at `2deac37e`, so Rust git consumers should take
+`7618a092` + `2deac37e`. The older `3.1.0-litecoin.1` artifacts pin the pre-merge `85eb2a99`
+ladder and still ship rustls 0.21; move off them.
 
 Android smoke and iOS smoke both consume the **same** `3.1.0-litecoin.3` binaries (AAR directly; Swift via `ltc-swift` `.3`).
 
