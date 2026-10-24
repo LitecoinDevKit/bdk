@@ -9,6 +9,9 @@ live interop was proven. Test/publish checklists stay in
 Independent verification (commands + CI + recorded ids):
 [`TEST_EVIDENCE.md`](TEST_EVIDENCE.md).
 
+Locked review decisions, each with "how we'd know it broke" pointers:
+[`decisions/`](decisions/).
+
 Longer context: [`PORTING.md`](../PORTING.md), [`MWEB_ARCHITECTURE.md`](MWEB_ARCHITECTURE.md),
 [`LTCSUITE_ALIGNMENT.md`](LTCSUITE_ALIGNMENT.md), [`LITECOIN_E2E.md`](LITECOIN_E2E.md),
 [`LITECOIN_CORE_BRIEFING.md`](LITECOIN_CORE_BRIEFING.md).
