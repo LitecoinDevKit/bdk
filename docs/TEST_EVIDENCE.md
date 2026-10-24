@@ -145,6 +145,14 @@ counterparty only — no Nexus / `lndltc` / `mwebd` code. Identify pure MWEB by
 
 Fuzz and Miri are the hostile-peer / UB layer. They do not replace layer 3.
 
+GitHub paused push-triggered workflows on this fork between 2026-10-14 and the
+upstream merge (`5156875e` → `9be34b62`). That range was validated locally on
+2026-10-24 with the `cont_integration.yml` matrix (MSRV 1.85.0, per-crate
+features, fmt, clippy, docs, Miri), the `regtest_mweb.yml` suites under
+`REQUIRE_LITECOIND=1` against litecoind 0.21.5.5, and the electrs-backed suites
+with `ELECTRS_LTC_EXE`. Not reproduced locally: the `wasm32` check (needs LLVM
+clang). Runs resume via `workflow_dispatch` once Actions is re-enabled.
+
 ---
 
 ## Live demo (Core call)
