@@ -59,13 +59,13 @@ Update this table when cutting a release; mirror only by linking here.
 | --- | --- | --- |
 | `bdk-ffi` release / AAR / xcframework | **`3.1.0-litecoin.1`** | [GitHub release](https://github.com/LitecoinDevKit/bdk-ffi/releases/tag/3.1.0-litecoin.1) |
 | `ltc-swift` (SwiftPM) | **`3.1.0-litecoin.2`** | Thin wrapper; binary still `3.1.0-litecoin.1` |
-| `bdk_wallet` (Rust) | **`3.1.0-litecoin.0`** @ `29779dcb` | Ports `Wallet::balance` to taint-aware `CanonicalView::balance`; pins this repo at `315f4e5b` |
-| Core crates (`bdk`, `bdk_mweb`, …) | `315f4e5b` (`litecoin`) | Merged `bitcoindevkit/bdk` `7b68d280`. See [`PORTING.md`](../PORTING.md) topology |
+| `bdk_wallet` (Rust) | **`3.1.0-litecoin.0`** @ `f1307827` | Taint-aware `Wallet::balance`; TLS stack is a single rustls 0.23 (no rustls 0.21 / webpki-roots 0.25); pins this repo at `2deac37e` |
+| Core crates (`bdk`, `bdk_mweb`, …) | `2deac37e` (`litecoin`) | Merged `bitcoindevkit/bdk` `7b68d280`; esplora-client fork on minreq 3, electrum-client fork on webpki-roots 1.x. See [`PORTING.md`](../PORTING.md) topology and [`SUPPLY_CHAIN.md`](SUPPLY_CHAIN.md) |
 
-Published mobile artifacts (`3.1.0-litecoin.1`) still pin the pre-merge `85eb2a99` ladder. Rust
-git consumers should take `bdk_wallet` `29779dcb` (and the `315f4e5b` bdk rev it pins). `bdk-ffi`
-`litecoin-mweb` must pin that same pair (see `scripts/check-rev-coherence.sh`). A new
-AAR/xcframework is a separate release.
+Published mobile artifacts (`3.1.0-litecoin.1`) still pin the pre-merge `85eb2a99` ladder and
+therefore still ship rustls 0.21 at runtime. Rust git consumers should take `bdk_wallet`
+`f1307827` (and the `2deac37e` bdk rev it pins). `bdk-ffi` `litecoin-mweb` pins that same pair at
+`46e76f67` (see `scripts/check-rev-coherence.sh`). A new AAR/xcframework is a separate release.
 
 Android smoke and iOS smoke both consume the **same** `3.1.0-litecoin.1` binaries (AAR directly; Swift via `ltc-swift` `.2`).
 
