@@ -59,15 +59,13 @@ Update this table when cutting a release; mirror only by linking here.
 | --- | --- | --- |
 | `bdk-ffi` release / AAR / xcframework | **`3.1.0-litecoin.1`** | [GitHub release](https://github.com/LitecoinDevKit/bdk-ffi/releases/tag/3.1.0-litecoin.1) |
 | `ltc-swift` (SwiftPM) | **`3.1.0-litecoin.2`** | Thin wrapper; binary still `3.1.0-litecoin.1` |
-| `bdk_wallet` (Rust) | **`3.1.0-litecoin.0`** | Rev-pinned from `bdk-ffi`; bump only with coherence check |
-| Core crates (`bdk`, `bdk_mweb`, …) | rev pinned by wallet / ffi | See [`PORTING.md`](../PORTING.md) topology |
+| `bdk_wallet` (Rust) | **`3.1.0-litecoin.0`** @ `29779dcb` | Ports `Wallet::balance` to taint-aware `CanonicalView::balance`; pins this repo at `315f4e5b` |
+| Core crates (`bdk`, `bdk_mweb`, …) | `315f4e5b` (`litecoin`) | Merged `bitcoindevkit/bdk` `7b68d280`. See [`PORTING.md`](../PORTING.md) topology |
 
-**Pin caveat (2026-10-24):** `bdk_wallet` `litecoin` and `bdk-ffi` `litecoin-mweb` pin this repo at
-`85eb2a99`, which predates the upstream merge to `bitcoindevkit/bdk` `7b68d280`. The current
-`litecoin` tip carries upstream's breaking chain API changes (`CanonicalView::balance` takes
-`does_taint` / `is_settled` / `is_locked` closures; `Anchor::confirmation_height_upper_bound` is
-gone; `LocalChain::apply_changeset` returns `ApplyChangeSetError`). Keep consuming the blessed
-`85eb2a99` rev until `bdk_wallet` is ported to the new API and the ladder is re-pinned together.
+Published mobile artifacts (`3.1.0-litecoin.1`) still pin the pre-merge `85eb2a99` ladder. Rust
+git consumers should take `bdk_wallet` `29779dcb` (and the `315f4e5b` bdk rev it pins). `bdk-ffi`
+`litecoin-mweb` must pin that same pair (see `scripts/check-rev-coherence.sh`). A new
+AAR/xcframework is a separate release.
 
 Android smoke and iOS smoke both consume the **same** `3.1.0-litecoin.1` binaries (AAR directly; Swift via `ltc-swift` `.2`).
 
