@@ -34,7 +34,7 @@ Run this against **[`ADOPTION.md`](ADOPTION.md) only** (plus docs it links). Goa
 
 ### Mobile (pick one)
 
-- [ ] Pin matches ADOPTION source-of-truth table (AAR `3.1.0-litecoin.1` or `ltc-swift` exact `3.1.0-litecoin.2`).
+- [ ] Pin matches ADOPTION source-of-truth table (AAR `3.1.0-litecoin.3` or `ltc-swift` exact `3.1.0-litecoin.3`).
 - [ ] Android: file AAR + JNA works **without** Maven Central.
 - [ ] Swift: SwiftPM resolves the exact tag.
 - [ ] Smoke or your stub: mnemonic → addresses → Electrum update → MWEB sync → `balanceCombined` (background thread for syncer).

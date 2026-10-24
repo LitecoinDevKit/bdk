@@ -57,17 +57,17 @@ Update this table when cutting a release; mirror only by linking here.
 
 | Artifact | Pin | Notes |
 | --- | --- | --- |
-| `bdk-ffi` release / AAR / xcframework | **`3.1.0-litecoin.1`** | [GitHub release](https://github.com/LitecoinDevKit/bdk-ffi/releases/tag/3.1.0-litecoin.1) |
-| `ltc-swift` (SwiftPM) | **`3.1.0-litecoin.2`** | Thin wrapper; binary still `3.1.0-litecoin.1` |
+| `bdk-ffi` release / AAR / xcframework | **`3.1.0-litecoin.3`** | [GitHub release](https://github.com/LitecoinDevKit/bdk-ffi/releases/tag/3.1.0-litecoin.3); first binary on the post-merge ladder, rustls 0.21 gone |
+| `ltc-swift` (SwiftPM) | **`3.1.0-litecoin.3`** | Thin wrapper over the `.3` xcframework; binary and SwiftPM tags re-synced at `.3` (`.2` was a wrapper-only bump) |
 | `bdk_wallet` (Rust) | **`3.1.0-litecoin.0`** @ `f1307827` | Taint-aware `Wallet::balance`; TLS stack is a single rustls 0.23 (no rustls 0.21 / webpki-roots 0.25); pins this repo at `2deac37e` |
 | Core crates (`bdk`, `bdk_mweb`, …) | `2deac37e` (`litecoin`) | Merged `bitcoindevkit/bdk` `7b68d280`; esplora-client fork on minreq 3, electrum-client fork on webpki-roots 1.x. See [`PORTING.md`](../PORTING.md) topology and [`SUPPLY_CHAIN.md`](SUPPLY_CHAIN.md) |
 
-Published mobile artifacts (`3.1.0-litecoin.1`) still pin the pre-merge `85eb2a99` ladder and
-therefore still ship rustls 0.21 at runtime. Rust git consumers should take `bdk_wallet`
-`f1307827` (and the `2deac37e` bdk rev it pins). `bdk-ffi` `litecoin-mweb` pins that same pair at
-`46e76f67` (see `scripts/check-rev-coherence.sh`). A new AAR/xcframework is a separate release.
+The `3.1.0-litecoin.3` mobile artifacts are built from `bdk-ffi` `ddf70619`, which pins exactly
+this pair: `bdk_wallet` `f1307827` and `bdk` `2deac37e` (see `scripts/check-rev-coherence.sh`).
+Rust git consumers should take the same two revs. The older `3.1.0-litecoin.1` artifacts pin the
+pre-merge `85eb2a99` ladder and still ship rustls 0.21; move off them.
 
-Android smoke and iOS smoke both consume the **same** `3.1.0-litecoin.1` binaries (AAR directly; Swift via `ltc-swift` `.2`).
+Android smoke and iOS smoke both consume the **same** `3.1.0-litecoin.3` binaries (AAR directly; Swift via `ltc-swift` `.3`).
 
 Crates are **not** on crates.io under `bdk_*` (upstream owns those names). Consumers use git revs or published mobile artifacts. The `litecoin` crate `0.32.8-rc.2` may still be path/git-patched until crates.io publish — that is supported.
 
@@ -102,7 +102,7 @@ Recipes: [`LITECOIN_E2E.md`](LITECOIN_E2E.md) § MWEB facade / BDK ↔ Nexus.
 ```bash
 # from your app repo
 curl -fL -o app/libs/bdk-ltc-android.aar \
-  https://github.com/LitecoinDevKit/bdk-ffi/releases/download/3.1.0-litecoin.1/bdk-ltc-android.aar
+  https://github.com/LitecoinDevKit/bdk-ffi/releases/download/3.1.0-litecoin.3/bdk-ltc-android.aar
 ```
 
 ```kotlin
@@ -114,7 +114,7 @@ implementation("net.java.dev.jna:jna:5.14.0@aar")
 **Swift** — SwiftPM:
 
 ```swift
-.package(url: "https://github.com/LitecoinDevKit/ltc-swift", exact: "3.1.0-litecoin.2")
+.package(url: "https://github.com/LitecoinDevKit/ltc-swift", exact: "3.1.0-litecoin.3")
 ```
 
 Mirror the smoke checklist: mnemonic → BIP84 wallet → MWEB address → Electrum sync → `MwebStore` + `MwebSyncer` → `balanceCombined` → fund/sign/extract. See smoke READMEs and [`bdk-ffi` README](https://github.com/LitecoinDevKit/bdk-ffi).
