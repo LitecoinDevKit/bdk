@@ -62,6 +62,13 @@ Update this table when cutting a release; mirror only by linking here.
 | `bdk_wallet` (Rust) | **`3.1.0-litecoin.0`** | Rev-pinned from `bdk-ffi`; bump only with coherence check |
 | Core crates (`bdk`, `bdk_mweb`, …) | rev pinned by wallet / ffi | See [`PORTING.md`](../PORTING.md) topology |
 
+**Pin caveat (2026-10-24):** `bdk_wallet` `litecoin` and `bdk-ffi` `litecoin-mweb` pin this repo at
+`85eb2a99`, which predates the upstream merge to `bitcoindevkit/bdk` `7b68d280`. The current
+`litecoin` tip carries upstream's breaking chain API changes (`CanonicalView::balance` takes
+`does_taint` / `is_settled` / `is_locked` closures; `Anchor::confirmation_height_upper_bound` is
+gone; `LocalChain::apply_changeset` returns `ApplyChangeSetError`). Keep consuming the blessed
+`85eb2a99` rev until `bdk_wallet` is ported to the new API and the ladder is re-pinned together.
+
 Android smoke and iOS smoke both consume the **same** `3.1.0-litecoin.1` binaries (AAR directly; Swift via `ltc-swift` `.2`).
 
 Crates are **not** on crates.io under `bdk_*` (upstream owns those names). Consumers use git revs or published mobile artifacts. The `litecoin` crate `0.32.8-rc.2` may still be path/git-patched until crates.io publish — that is supported.

@@ -140,6 +140,29 @@ git checkout litecoin && git merge master
 Conflicts should be confined to manifests. If a conflict appears in `.rs` files, that is a signal
 the port is drifting from the alias-only approach and should be corrected rather than patched over.
 
+Last merged upstream base: `7b68d280` (bitcoindevkit/bdk master, 2026-10-22).
+
+Two spots need manual care on every merge and are not drift:
+
+- **`crates/testenv/src/daemon.rs`** is upstream's `crates/testenv/src/lib.rs` moved out of the
+  way (the fork's `lib.rs` is a shim that gates it behind `daemon` + `daemon_tests`). Git cannot
+  follow that, so after resolving `lib.rs` to the shim, regenerate `daemon.rs` from
+  `git show master:crates/testenv/src/lib.rs` with exactly three deltas: drop the
+  `#![cfg_attr(coverage_nightly, …)]` + `pub mod utils;` header, drop
+  `pub use electrsd::bitcoind::anyhow;`, and add `mw_tx: None, is_hog_ex: false` to the coinbase
+  `Transaction` literal. `diff` against the upstream file should show only those lines.
+  `LitecoinTestEnv` in `litecoin_regtest.rs` mirrors `TestEnv`'s wait helpers
+  (`wait_until_electrum_sees_block(height, Option<hash>, timeout)`,
+  `wait_until_electrum_tip_syncs_with_bitcoind`); keep the signatures aligned so ported tests
+  keep the same call shape.
+- **`crates/bitcoind_rpc/tests/*.upstream`** are upstream's Bitcoin `TestEnv` tests parked under a
+  different extension. Git's rename detection usually carries upstream's edits onto them; if it
+  reports modify/delete instead, re-apply the hunks by hand and keep them parked.
+
+Workflows pin actions by SHA (see `docs/SUPPLY_CHAIN.md`). When upstream bumps a tag
+(e.g. `actions/checkout@v7`), resolve to the tag's commit SHA with a `# v7` comment rather than
+taking the floating tag.
+
 ## What the alias changes in the API
 
 Almost nothing, with one exception worth knowing about: `litecoin::Transaction` has two fields that
