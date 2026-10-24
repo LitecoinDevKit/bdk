@@ -19,14 +19,16 @@ unmaintained = "workspace"
 # Kept in lockstep with .cargo/audit.toml. Every entry needs a reason and an
 # exit condition — an undocumented ignore is a permanent blind spot.
 ignore = [
-  # rustls 0.21 / rustls-webpki 0.101, transitive via minreq 2.x, reached only
-  # by bdk_esplora and the jsonrpc client. Not on any bdk_mweb path: the mweb
-  # crate has no TLS dependency at all (its only network code is the plain-TCP
-  # LIP-0006 peer in lip0006_tcp.rs).
-  # Clears when IndigoNakamoto/rust-esplora-client and jsonrpc move off rustls 0.21.
-  "RUSTSEC-2026-0098",
-  "RUSTSEC-2026-0099",
-  "RUSTSEC-2026-0104",
+  # zip 0.6.6, a *build*-dependency of corepc-node, reached only through the
+  # optional Bitcoin Core downloader in `electrsd` (bdk_testenv dev-dep). The
+  # fork never enables that downloader (Regtest MWEB uses a local litecoind),
+  # so the vulnerable archive-extraction code never compiles here, and it is
+  # never shipped in any library artifact. Only `cargo audit` (which scans the
+  # whole lockfile) sees it; this cargo-deny run is all-features=false.
+  # Clears when corepc-node moves off zip 0.6 and electrsd picks that up.
+  "RUSTSEC-2026-0367",
+  "RUSTSEC-2026-0368",
+  "RUSTSEC-2026-0369",
   # bincode unmaintained. Reached via bdk_file_store, which bdk_mweb uses only
   # in tests (`persist_filestore`). Not a vulnerability; an unmaintained notice.
   # Clears when file_store migrates its encoding.

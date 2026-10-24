@@ -17,13 +17,13 @@ workspace = true
 
 [dependencies]
 bdk_core = { path = "../core", version = "0.6.1", default-features = false }
-esplora-client = { git = "https://github.com/IndigoNakamoto/rust-esplora-client", rev = "4dbaeab0ecfd51c5f7c41141690dd8dcd0ec2fb3", default-features = false }
+esplora-client = { git = "https://github.com/IndigoNakamoto/rust-esplora-client", rev = "17ac6011438165563c32d8971d9311d53508665e", default-features = false }
 async-trait = { version = "0.1.66", optional = true }
 futures = { version = "0.3.26", optional = true }
 serde_json = { version = "1.0", features = ["alloc"] }
 
 [dev-dependencies]
-esplora-client = { git = "https://github.com/IndigoNakamoto/rust-esplora-client", rev = "4dbaeab0ecfd51c5f7c41141690dd8dcd0ec2fb3" }
+esplora-client = { git = "https://github.com/IndigoNakamoto/rust-esplora-client", rev = "17ac6011438165563c32d8971d9311d53508665e" }
 bdk_chain = { path = "../chain" }
 bdk_testenv = { path = "../testenv" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }

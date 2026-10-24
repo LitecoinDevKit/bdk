@@ -15,7 +15,7 @@ workspace = true
 
 [dependencies]
 bdk_core = { path = "../core", version = "0.6.1" }
-electrum-client = { git = "https://github.com/LitecoinDevKit/rust-electrum-client", rev = "b6b6ee44eca962032ddc4d3e93b896e693d8439f", features = [ "proxy" ], default-features = false }
+electrum-client = { git = "https://github.com/LitecoinDevKit/rust-electrum-client", rev = "6ffa5afa81bc712c9eff2130c7feadae608c62da", features = [ "proxy" ], default-features = false }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv", features = ["litecoin-daemon"] }

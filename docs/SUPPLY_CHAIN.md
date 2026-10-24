@@ -112,15 +112,28 @@ permanent blind spot.
 
 | Advisory | What | Reaches `bdk_mweb`? | Clears when |
 | --- | --- | --- | --- |
-| `RUSTSEC-2026-0098` | rustls 0.21 | No | `rust-esplora-client` and `jsonrpc` move off rustls 0.21 |
-| `RUSTSEC-2026-0099` | rustls 0.21 | No | as above |
-| `RUSTSEC-2026-0104` | rustls-webpki 0.101 | No | as above |
+| `RUSTSEC-2026-0367` | `zip` 0.6.6 | No | `corepc-node` moves off zip 0.6 and `electrsd` picks it up |
+| `RUSTSEC-2026-0368` | `zip` 0.6.6 | No | as above |
+| `RUSTSEC-2026-0369` | `zip` 0.6.6 | No | as above |
 | `RUSTSEC-2025-0141` | `bincode` unmaintained | Tests only | `bdk_file_store` changes its encoding |
 
-None are on a `bdk_mweb` code path. The crate has no TLS dependency at all: its
-only network code is the plain-TCP LIP-0006 peer in `lip0006_tcp.rs`, and
-`bincode` arrives through `bdk_file_store`, which `bdk_mweb` uses only in the
-`persist_filestore` test.
+None are on a `bdk_mweb` code path. `zip` 0.6.6 is a *build*-dependency of
+`corepc-node`, reached only through the optional Bitcoin Core downloader in
+`electrsd` (a `bdk_testenv` dev-dependency). The fork never enables that
+downloader — Regtest MWEB runs against a local `litecoind` — so the vulnerable
+extraction code is never compiled and never ships in a library artifact. Only
+`cargo audit` sees it, because it scans the whole lockfile; the `cargo deny`
+run is `all-features = false`. `bincode` arrives through `bdk_file_store`,
+which `bdk_mweb` uses only in the `persist_filestore` test.
+
+Previously ignored and now cleared: `RUSTSEC-2026-0098`/`0099` (rustls 0.21)
+and `RUSTSEC-2026-0104` (rustls-webpki 0.101) came in through `minreq` 2.x
+under `rust-esplora-client`. The fork moved to `minreq` 3 (rustls 0.23,
+webpki-roots 1.x) in `17ac6011`. `jsonrpc` 0.18 still requires `minreq` 2, but
+its `minreq_http` feature enables no TLS backend, so rustls 0.21 is no longer
+in the resolved graph at all. `rust-electrum-client` moved from
+`webpki-roots` 0.25 to 1.0.10 (`6ffa5afa`), mirroring upstream `ee435a0b`,
+which clears `RUSTSEC-2026-0381`.
 
 ## Direct dependencies of `crates/mweb`
 

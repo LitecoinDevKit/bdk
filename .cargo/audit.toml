@@ -1,17 +1,18 @@
 # Ignored advisories. Kept in sync by hand with the `[advisories].ignore` list
 # in deny.toml; the reasoning and exit conditions are in docs/SUPPLY_CHAIN.md.
 #
-# None of these are on a bdk_mweb code path: the crate has no TLS dependency
-# (its only network code is the plain-TCP LIP-0006 peer), and bincode arrives
-# through bdk_file_store, which bdk_mweb uses only in the persist_filestore test.
+# None of these are on a bdk_mweb code path: zip is a build-dependency of a
+# test-only downloader the fork never enables, and bincode arrives through
+# bdk_file_store, which bdk_mweb uses only in the persist_filestore test.
 [advisories]
 ignore = [
-    # rustls 0.21 / rustls-webpki 0.101, transitive via minreq 2.x, reached by
-    # bdk_esplora and the jsonrpc client. Clears when
-    # IndigoNakamoto/rust-esplora-client and jsonrpc move off rustls 0.21.
-    "RUSTSEC-2026-0098",
-    "RUSTSEC-2026-0099",
-    "RUSTSEC-2026-0104",
+    # zip 0.6.6, build-dependency of corepc-node via the optional Bitcoin Core
+    # downloader in electrsd (bdk_testenv dev-dep). Never enabled by the fork,
+    # never compiled, never shipped. Clears when corepc-node moves off zip 0.6
+    # and electrsd picks that up.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
     # bincode unmaintained, via bdk_file_store. An unmaintained notice, not a
     # vulnerability. Clears when file_store changes its encoding.
     "RUSTSEC-2025-0141",
