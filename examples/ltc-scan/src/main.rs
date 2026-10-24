@@ -236,8 +236,14 @@ fn report(
         );
     }
 
-    // Every script pubkey belongs to the descriptor being scanned, so all of it is trusted.
-    let balance = view.balance(outpoints, |_, _| true, 0);
+    // Every script pubkey belongs to the descriptor being scanned, so nothing taints, any
+    // confirmation settles, and no output is locked.
+    let balance = view.balance(
+        outpoints.map(|(_, op)| op),
+        |_tx| false,
+        |pos| pos.is_confirmed(),
+        |_txout| false,
+    );
     println!("\nconfirmed:        {}", sats(balance.confirmed));
     println!("pending:          {}", sats(balance.trusted_pending));
     println!("immature:         {}", sats(balance.immature));

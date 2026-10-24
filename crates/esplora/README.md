@@ -23,6 +23,19 @@ litecoinspace does not implement `/fee-estimates`, so
 [`esplora_client::get_fee_estimates`](https://docs.rs/esplora-client/) fails against it. Syncing is
 unaffected; fee estimation needs another source.
 
+## Trust assumptions
+
+The Esplora server is trusted: it can hide transactions or misreport confirmations.
+
+Esplora also reports each input's previous output (value and script). `sync` and `full_scan`
+insert these into `TxUpdate::txouts` as floating txouts without fetching the parent
+transactions to verify them.
+
+If a parent transaction is not in your `TxGraph`, fee and sent/received calculations
+rely on these unverified values. This includes inputs owned by other parties, such as
+in payjoin or coinjoin transactions. Use a trusted Esplora server, or fetch and verify
+the parent transactions before relying on these figures.
+
 ## Usage
 
 For blocking-only:

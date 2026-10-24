@@ -20,7 +20,9 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Context, Result};
 use bdk_chain::bitcoin::blockdata::mimblewimble;
 use bdk_chain::bitcoin::consensus::encode::{deserialize_hex, serialize_hex};
-use bdk_chain::bitcoin::{Address, Amount, Block, BlockHash, Network, Transaction, Txid};
+use bdk_chain::bitcoin::{
+    block::Header, Address, Amount, Block, BlockHash, Network, Transaction, Txid,
+};
 use bdk_chain::mweb_pegin_script_pubkey;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -777,7 +779,7 @@ impl LitecoinTestEnv {
             electrs,
         };
 
-        if let Err(e) = env.wait_until_electrum_sees_block(Duration::from_secs(60)) {
+        if let Err(e) = env.wait_until_electrum_tip_syncs_with_bitcoind(Duration::from_secs(60)) {
             drop(env);
             return Err(e);
         }
@@ -822,24 +824,57 @@ impl LitecoinTestEnv {
         Ok(res)
     }
 
-    /// Poll until electrs tip height matches `litecoind`.
-    pub fn wait_until_electrum_sees_block(&self, timeout: Duration) -> Result<()> {
+    /// Poll until electrs reports a tip at or past `block_height` (and, when `block_hash` is
+    /// given, until the header it serves at that height has that hash).
+    ///
+    /// Mirrors upstream `TestEnv::wait_until_electrum_sees_block` so ported tests keep the same
+    /// call shape.
+    pub fn wait_until_electrum_sees_block(
+        &self,
+        block_height: u32,
+        block_hash: Option<BlockHash>,
+        timeout: Duration,
+    ) -> Result<()> {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
-            let node_height = self.rpc.get_block_count()?;
             if let Ok(v) = electrum_call(
                 &self.electrum_host,
                 "blockchain.headers.subscribe",
                 json!([]),
             ) {
-                let tip = v["height"].as_u64().unwrap_or(u64::MAX) as u32;
-                if tip == node_height {
-                    return Ok(());
+                let tip = v["height"].as_u64().unwrap_or(0) as u32;
+                if tip >= block_height {
+                    match block_hash {
+                        None => return Ok(()),
+                        Some(expected) => {
+                            if let Ok(h) = electrum_call(
+                                &self.electrum_host,
+                                "blockchain.block.header",
+                                json!([block_height]),
+                            ) {
+                                let hex = h.as_str().unwrap_or_default();
+                                if let Ok(header) = deserialize_hex::<Header>(hex) {
+                                    if header.block_hash() == expected {
+                                        return Ok(());
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             thread::sleep(Duration::from_millis(200));
         }
-        bail!("timed out waiting for electrs tip to match litecoind")
+        bail!("timed out waiting for electrs to sync to block {block_height}")
+    }
+
+    /// Poll until electrs tip matches `litecoind`'s tip (height and hash).
+    ///
+    /// Mirrors upstream `TestEnv::wait_until_electrum_tip_syncs_with_bitcoind`.
+    pub fn wait_until_electrum_tip_syncs_with_bitcoind(&self, timeout: Duration) -> Result<()> {
+        let node_height = self.rpc.get_block_count()?;
+        let node_hash = self.rpc.get_block_hash(node_height)?;
+        self.wait_until_electrum_sees_block(node_height, Some(node_hash), timeout)
     }
 }
 

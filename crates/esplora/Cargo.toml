@@ -26,7 +26,7 @@ serde_json = { version = "1.0", features = ["alloc"] }
 esplora-client = { git = "https://github.com/IndigoNakamoto/rust-esplora-client", rev = "4dbaeab0ecfd51c5f7c41141690dd8dcd0ec2fb3" }
 bdk_chain = { path = "../chain" }
 bdk_testenv = { path = "../testenv" }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }
 serde_json = { version = "1" }
 
 [features]
