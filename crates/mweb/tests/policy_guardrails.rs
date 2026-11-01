@@ -1,7 +1,7 @@
 //! P-2: LDK authoring guardrails against Litecoin Core 0.21.5.8 relay policy.
 //!
 //! `core_policy_guardrails` shows what Core does with each of these; here we
-//! assert that `fund_mweb_spend` refuses them up front. All are red today.
+//! assert that `fund_mweb_spend` refuses them up front.
 
 use bdk_mweb::keys::{MasterKeyScheme, MasterKeys};
 use bdk_mweb::psbt_fund::fund_mweb_spend;
@@ -75,7 +75,6 @@ fn p2wpkh() -> ScriptBuf {
 }
 
 #[test]
-#[ignore = "P-2 red test: no MWEB weight or fee floor"]
 fn refuses_fee_below_weight_times_100() {
     // One recipient + change + stealth kernel = weight 39, floor 3,900.
     assert!(fund(1, vec![], 3_900).is_ok());
@@ -83,21 +82,18 @@ fn refuses_fee_below_weight_times_100() {
 }
 
 #[test]
-#[ignore = "P-2 red test: no 4,000-weight relay cap"]
 fn refuses_tx_over_relay_weight_cap() {
     // 222 recipients + change + stealth kernel = weight 4,017.
     assert!(fund(222, vec![], 4_017 * 100).is_err());
 }
 
 #[test]
-#[ignore = "P-2 red test: peg-out scripts are not checked"]
 fn refuses_op_return_pegout() {
     let burn = ScriptBuf::new_op_return([0u8; 0]);
     assert!(fund(0, vec![(burn, 10_000_000)], 50_000).is_err());
 }
 
 #[test]
-#[ignore = "P-2 red test: peg-out scripts are not checked"]
 fn refuses_nonstandard_empty_and_mweb_pegout_scripts() {
     let anyone = Builder::new().push_opcode(OP_PUSHNUM_1).into_script();
     let pegin = ScriptBuf::new_witness_program(
@@ -115,7 +111,6 @@ fn refuses_nonstandard_empty_and_mweb_pegout_scripts() {
 }
 
 #[test]
-#[ignore = "P-2 red test: peg-out dust is not checked"]
 fn refuses_dust_pegout() {
     assert!(fund(0, vec![(p2wpkh(), 1)], 50_000).is_err());
 }

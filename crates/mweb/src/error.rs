@@ -67,6 +67,8 @@ pub enum Error {
     NotMwebAddress,
     /// Consensus / FFI crypto failure.
     Crypto(String),
+    /// The transaction would break Litecoin Core's relay policy (see [`crate::policy`]).
+    Policy(String),
     /// Peer-attributable failure; the [`BanReason`] drives ban/rotate decisions.
     ///
     /// Custom [`crate::lip0006::MwebUtxoSource`] implementations should use the
@@ -121,6 +123,7 @@ impl fmt::Display for Error {
             Self::MissingCoinSecrets => write!(f, "MWEB coin missing spend_key or blind"),
             Self::NotMwebAddress => write!(f, "address is not an MWEB stealth address"),
             Self::Crypto(e) => write!(f, "MWEB crypto error: {e}"),
+            Self::Policy(e) => write!(f, "MWEB relay policy: {e}"),
             Self::Peer(reason, e) => write!(f, "MWEB peer error ({reason}): {e}"),
         }
     }

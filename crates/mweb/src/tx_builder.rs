@@ -103,6 +103,7 @@ pub struct MwebTxBuilder {
     recipients: Vec<(Address, u64)>,
     pegouts: Vec<(ScriptBuf, u64)>,
     fee: u64,
+    skip_policy: bool,
 }
 
 impl MwebTxBuilder {
@@ -135,6 +136,17 @@ impl MwebTxBuilder {
         self
     }
 
+    /// Build even when the result breaks Litecoin Core's relay policy
+    /// ([`crate::policy`]): fee below the MWEB minimum, oversize, or a peg-out
+    /// script nodes refuse or that burns its value.
+    ///
+    /// For exercising node policy in tests. Such a transaction never confirms,
+    /// and an OP_RETURN peg-out destroys the amount.
+    pub fn skip_relay_policy_checks(mut self) -> Self {
+        self.skip_policy = true;
+        self
+    }
+
     /// Build a balanced MWEB transaction (MWEB→MWEB and/or peg-out).
     ///
     /// Change (if any) goes to `keys.address(change_index, network)`.
@@ -153,6 +165,14 @@ impl MwebTxBuilder {
             return Err(Error::InsufficientFunds);
         }
         let change_amount = input_total - needed;
+        if !self.skip_policy {
+            crate::policy::check_authored(
+                self.inputs.len(),
+                self.recipients.len() + usize::from(change_amount > 0),
+                &self.pegouts,
+                self.fee,
+            )?;
+        }
 
         let mut all_recipients = self.recipients;
         let change_pos = if change_amount > 0 {
@@ -202,6 +222,7 @@ pub fn build_pegin(
     if pegin_amount <= fee {
         return Err(Error::InsufficientFunds);
     }
+    crate::policy::check_fee(crate::policy::mweb_weight(1, []), fee)?;
     let receive_amount = pegin_amount - fee;
     let addr = keys.address(receive_index, network, secp)?;
     let recipients = vec![(addr, receive_amount)];

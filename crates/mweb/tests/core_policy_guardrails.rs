@@ -1,8 +1,8 @@
 //! What Litecoin Core's relay policy does with MWEB spends LDK can author today.
 //!
-//! These pin Core's behaviour, not LDK's: `MwebTxBuilder` and `fund_mweb_spend`
-//! take the fee and peg-out scripts as given (P-2), so each case below is one
-//! a caller can hit. Run under both `LITECOIND_RELAY_POLICY` values; the
+//! These pin Core's behaviour, which `bdk_mweb::policy` mirrors: they build
+//! with the builder's relay-policy checks switched off and show what a node
+//! does with each case. Run under both `LITECOIND_RELAY_POLICY` values; the
 //! expected outcome differs only where Core's MWEB relay policy applies.
 //!
 //! Needs `LITECOIND_EXE` (skips when unset).
@@ -65,7 +65,12 @@ fn build(
     fee: u64,
 ) -> Transaction {
     let secp = Secp256k1::new();
-    let mut b = MwebTxBuilder::new().add_input(coin.clone()).fee(fee);
+    // LDK now refuses all of these itself (`policy_guardrails`); skip that to
+    // see what the node does with them.
+    let mut b = MwebTxBuilder::new()
+        .add_input(coin.clone())
+        .fee(fee)
+        .skip_relay_policy_checks();
     for i in 0..recipients {
         let addr = keys
             .address(10 + i as u32, NetworkKind::Test, &secp)

@@ -79,7 +79,8 @@ fn builder_spends_balance_commitments_and_stealth_sums() {
             })
             .collect();
         let total: u64 = coins.iter().map(|c| c.amount).sum();
-        let fee = 1_000 + rng.below(100_000);
+        // Above the relay floor for the largest case built here (weight 58).
+        let fee = 10_000 + rng.below(100_000);
         let mut budget = total - fee;
         let mut b = MwebTxBuilder::new().fee(fee);
         for c in &coins {
@@ -95,10 +96,11 @@ fn builder_spends_balance_commitments_and_stealth_sums() {
             b = b.add_recipient(addr, amt);
         }
         for _ in 0..rng.below(2) {
-            let amt = 1 + rng.below(budget / 4 + 1);
+            let amt = 10_000 + rng.below(budget / 4);
             budget -= amt;
             pegout_total += amt;
-            b = b.add_pegout(ScriptBuf::new_op_return([1u8]), amt);
+            let p2wpkh = ScriptBuf::from_bytes([0x00, 0x14].into_iter().chain([7u8; 20]).collect());
+            b = b.add_pegout(p2wpkh, amt);
         }
         let finished = b
             .finish(&keys, CHANGE_ADDRESS_INDEX, NetworkKind::Test, &secp)

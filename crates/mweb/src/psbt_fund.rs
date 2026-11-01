@@ -91,6 +91,12 @@ pub fn fund_mweb_spend(
         return Err(Error::InsufficientFunds);
     }
     let change_amount = input_total - needed;
+    crate::policy::check_authored(
+        inputs.len(),
+        recipients.len() + usize::from(change_amount > 0),
+        &pegouts,
+        fee,
+    )?;
 
     let mut all_recipients = recipients;
     let mut change_pos = None;
@@ -416,6 +422,7 @@ pub fn fund_mweb_pegin(
     if pegin_amount <= fee {
         return Err(Error::InsufficientFunds);
     }
+    crate::policy::check_fee(crate::policy::mweb_weight(1, []), fee)?;
     let receive_amount = pegin_amount - fee;
     let addr = keys.address(receive_index, network, secp)?;
     let (raw_blind, sender_key, output) = create_output(&addr, receive_amount, secp)?;

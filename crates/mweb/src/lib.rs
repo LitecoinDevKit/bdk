@@ -38,6 +38,7 @@ pub mod mweb_sync;
 pub mod p2p;
 #[cfg(feature = "lip0006")]
 pub mod pmmr;
+pub mod policy;
 pub mod psbt;
 pub mod psbt_fund;
 pub mod psbt_ltcd;
