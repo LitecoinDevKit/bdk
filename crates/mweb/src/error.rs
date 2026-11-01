@@ -35,6 +35,17 @@ pub enum BanReason {
     /// good node out of the pool for busy-ness, and in the common single-peer
     /// deployment it would take out the only node the wallet has.
     Throttled,
+    /// Block data the peer relayed (an MWEB output, the HogEx, or the MWEB
+    /// header) did not decode.
+    ///
+    /// The peer did not author this data; it came out of a block. Our decoders
+    /// are meant to accept everything consensus accepts, so a failure here is
+    /// either a lying peer or a decoder that has drifted from Core — and P-1
+    /// was the latter: an off-curve output key made every honest peer look
+    /// banworthy. The two cannot be told apart before the data verifies, so
+    /// this is **not** banworthy: the pool rotates without banning, and a
+    /// failure from every peer is reported as a likely local decoder bug.
+    Undecodable,
 }
 
 impl fmt::Display for BanReason {
@@ -44,6 +55,7 @@ impl fmt::Display for BanReason {
             Self::ProtocolViolation => write!(f, "protocol violation"),
             Self::Transport => write!(f, "transport failure"),
             Self::Throttled => write!(f, "rate limited"),
+            Self::Undecodable => write!(f, "undecodable block data"),
         }
     }
 }
@@ -99,10 +111,17 @@ impl Error {
         Self::Peer(BanReason::Throttled, msg.into())
     }
 
+    /// Block data relayed by the peer did not decode. Not banworthy; see
+    /// [`BanReason::Undecodable`].
+    pub fn undecodable(msg: impl Into<String>) -> Self {
+        Self::Peer(BanReason::Undecodable, msg.into())
+    }
+
     /// The typed ban classification, when this error is peer-attributable.
     ///
     /// Peer-attributable is not the same as banworthy: [`BanReason::Throttled`]
-    /// identifies the peer as the source without justifying a ban. Use
+    /// and [`BanReason::Undecodable`] identify the peer as the source without
+    /// justifying a ban. Use
     /// [`crate::mweb_sync::is_banworthy_peer_error`] for the ban decision.
     pub fn ban_reason(&self) -> Option<BanReason> {
         match self {

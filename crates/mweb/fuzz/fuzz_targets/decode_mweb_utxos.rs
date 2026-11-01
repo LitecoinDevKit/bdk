@@ -6,14 +6,33 @@
 //! before any verification runs.
 
 use bdk_mweb::limits::{MAX_PARENT_HASHES, MAX_UTXOS_PER_BATCH};
+use bdk_mweb::BanReason;
 use bdk_mweb::p2p::{MwebUtxos, OUTPUT_FORMAT_FULL};
 use honggfuzz::fuzz;
 use litecoin::consensus::encode::{deserialize, serialize};
 
 fn do_test(data: &[u8]) {
+    // The sync path decodes through `from_payload`, whose failure class decides
+    // whether the peer is banned.
+    let classified = MwebUtxos::from_payload(data);
+    if let Err(e) = &classified {
+        assert!(
+            matches!(
+                e.ban_reason(),
+                Some(BanReason::ProtocolViolation | BanReason::Undecodable)
+            ),
+            "unexpected mwebutxos decode classification: {e}"
+        );
+    }
+
     let Ok(decoded) = deserialize::<MwebUtxos>(data) else {
         return;
     };
+    assert_eq!(
+        classified.as_ref().ok(),
+        Some(&decoded),
+        "from_payload disagrees with consensus decode"
+    );
 
     assert!(decoded.utxos.len() <= MAX_UTXOS_PER_BATCH);
     assert!(decoded.parent_hashes.len() <= MAX_PARENT_HASHES);

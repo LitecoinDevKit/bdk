@@ -118,8 +118,51 @@ impl Encodable for MwebUtxos {
     }
 }
 
-impl Decodable for MwebUtxos {
-    fn consensus_decode<R: Read + ?Sized>(r: &mut R) -> Result<Self, encode::Error> {
+/// A message decode failure, split by who authored the bytes that failed.
+///
+/// Framing (counts, formats, the merkle proof) is the peer's own encoding and
+/// maps to [`Error::protocol`]. Block data (MWEB outputs, the HogEx, the MWEB
+/// header) is only relayed, so it maps to [`Error::undecodable`], which does
+/// not ban: see [`crate::error::BanReason::Undecodable`].
+enum DecodeFailure {
+    Framing(encode::Error),
+    BlockData(alloc::string::String, encode::Error),
+}
+
+impl From<encode::Error> for DecodeFailure {
+    fn from(e: encode::Error) -> Self {
+        Self::Framing(e)
+    }
+}
+
+impl DecodeFailure {
+    fn into_encode(self) -> encode::Error {
+        match self {
+            Self::Framing(e) | Self::BlockData(_, e) => e,
+        }
+    }
+
+    fn into_error(self, command: &str) -> Error {
+        match self {
+            Self::Framing(e) => Error::protocol(alloc::format!("{command} decode: {e}")),
+            Self::BlockData(what, e) => {
+                Error::undecodable(alloc::format!("{command} decode: {what}: {e}"))
+            }
+        }
+    }
+}
+
+impl MwebUtxos {
+    /// Decode an `mwebutxos` payload, classifying a failure for peer scoring.
+    ///
+    /// A malformed batch envelope is a [`Error::protocol`] violation; an output
+    /// inside it that does not decode is [`Error::undecodable`].
+    pub fn from_payload(payload: &[u8]) -> Result<Self, Error> {
+        let mut r = payload;
+        Self::decode_classified(&mut r).map_err(|f| f.into_error("mwebutxos"))
+    }
+
+    fn decode_classified<R: Read + ?Sized>(r: &mut R) -> Result<Self, DecodeFailure> {
         let block_hash = BlockHash::consensus_decode(r)?;
         let start_index = VarInt::consensus_decode(r)?.0;
         let output_format = u8::consensus_decode(r)?;
@@ -128,13 +171,15 @@ impl Decodable for MwebUtxos {
         if output_format != OUTPUT_FORMAT_FULL {
             return Err(encode::Error::ParseFailed(
                 "bdk_mweb only decodes FULL_UTXO (0x00) mwebutxos",
-            ));
+            )
+            .into());
         }
         let n = VarInt::consensus_decode(r)?.0;
         if n > MAX_UTXOS_PER_BATCH as u64 {
             return Err(encode::Error::ParseFailed(
                 "mwebutxos utxo count exceeds MAX_UTXOS_PER_BATCH",
-            ));
+            )
+            .into());
         }
         let n = n as usize;
         // Reserve for what the peer will plausibly deliver, not for what it claimed:
@@ -142,14 +187,17 @@ impl Decodable for MwebUtxos {
         let mut utxos = Vec::with_capacity(n.min(RESERVE_CHUNK));
         for _ in 0..n {
             let leaf_index = VarInt::consensus_decode(r)?.0;
-            let output = Output::consensus_decode(r)?;
+            let output = Output::consensus_decode(r).map_err(|e| {
+                DecodeFailure::BlockData(alloc::format!("output at leaf {leaf_index}"), e)
+            })?;
             utxos.push(MwebUtxoEntry { leaf_index, output });
         }
         let nh = VarInt::consensus_decode(r)?.0;
         if nh > MAX_PARENT_HASHES as u64 {
             return Err(encode::Error::ParseFailed(
                 "mwebutxos parent_hashes count exceeds MAX_PARENT_HASHES",
-            ));
+            )
+            .into());
         }
         let nh = nh as usize;
         let mut parent_hashes = Vec::with_capacity(nh.min(RESERVE_CHUNK));
@@ -163,6 +211,12 @@ impl Decodable for MwebUtxos {
             utxos,
             parent_hashes,
         })
+    }
+}
+
+impl Decodable for MwebUtxos {
+    fn consensus_decode<R: Read + ?Sized>(r: &mut R) -> Result<Self, encode::Error> {
+        Self::decode_classified(r).map_err(DecodeFailure::into_encode)
     }
 }
 
@@ -294,13 +348,33 @@ impl Encodable for MwebHeaderMsg {
     }
 }
 
+impl MwebHeaderMsg {
+    /// Decode an `mwebheader` payload, classifying a failure for peer scoring.
+    ///
+    /// A malformed merkle proof is a [`Error::protocol`] violation; a HogEx or
+    /// MWEB header that does not decode is [`Error::undecodable`].
+    pub fn from_payload(payload: &[u8]) -> Result<Self, Error> {
+        let mut r = payload;
+        Self::decode_classified(&mut r).map_err(|f| f.into_error("mwebheader"))
+    }
+
+    fn decode_classified<R: Read + ?Sized>(r: &mut R) -> Result<Self, DecodeFailure> {
+        let merkle = MerkleBlock::consensus_decode(r)?;
+        let hogex = Transaction::consensus_decode(r)
+            .map_err(|e| DecodeFailure::BlockData("HogEx".into(), e))?;
+        let mweb_header = MwebBlockHeader::consensus_decode(r)
+            .map_err(|e| DecodeFailure::BlockData("MWEB header".into(), e))?;
+        Ok(Self {
+            merkle,
+            hogex,
+            mweb_header,
+        })
+    }
+}
+
 impl Decodable for MwebHeaderMsg {
     fn consensus_decode<R: Read + ?Sized>(r: &mut R) -> Result<Self, encode::Error> {
-        Ok(Self {
-            merkle: MerkleBlock::consensus_decode(r)?,
-            hogex: Transaction::consensus_decode(r)?,
-            mweb_header: MwebBlockHeader::consensus_decode(r)?,
-        })
+        Self::decode_classified(r).map_err(DecodeFailure::into_encode)
     }
 }
 
@@ -536,6 +610,97 @@ mod tests {
         raw.push(0); // zero utxos
         raw.push(0); // zero parent hashes
         assert!(deserialize::<MwebUtxos>(&raw).is_err());
+        let err = MwebUtxos::from_payload(&raw).unwrap_err();
+        assert_eq!(
+            err.ban_reason(),
+            Some(crate::error::BanReason::ProtocolViolation),
+            "{err}"
+        );
+    }
+
+    fn sample_output() -> Output {
+        use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
+        let pk = PublicKey::from_secret_key(
+            &Secp256k1::new(),
+            &SecretKey::from_slice(&[1u8; 32]).unwrap(),
+        );
+        Output {
+            commitment: [8; 33],
+            sender_public_key: pk,
+            receiver_public_key: pk.serialize(),
+            message: bitcoin::blockdata::mimblewimble::OutputMessage {
+                features: 0,
+                standard_fields: None,
+                extra_data: Vec::new(),
+            },
+            range_proof: [8; 675],
+            signature: [8; 64],
+        }
+    }
+
+    /// An output that does not decode is block data the peer only relayed, so it
+    /// classifies as `Undecodable` (no ban); the envelope around it stays a
+    /// protocol violation.
+    #[test]
+    fn utxos_from_payload_classifies_output_failures_as_undecodable() {
+        let batch = MwebUtxos {
+            block_hash: BlockHash::from_byte_array([7u8; 32]),
+            start_index: 0,
+            output_format: OUTPUT_FORMAT_FULL,
+            utxos: alloc::vec![MwebUtxoEntry {
+                leaf_index: 3,
+                output: sample_output(),
+            }],
+            parent_hashes: Vec::new(),
+        };
+        let raw = serialize(&batch);
+        assert_eq!(MwebUtxos::from_payload(&raw).unwrap(), batch);
+
+        let err = MwebUtxos::from_payload(&raw[..raw.len() - 100]).unwrap_err();
+        assert_eq!(
+            err.ban_reason(),
+            Some(crate::error::BanReason::Undecodable),
+            "{err}"
+        );
+        assert!(
+            alloc::format!("{err}").contains("output at leaf 3"),
+            "{err}"
+        );
+        assert!(!crate::mweb_sync::is_banworthy_peer_error(&err));
+    }
+
+    #[test]
+    fn header_from_payload_classifies_by_section() {
+        let (msg, _) = synthetic_anchored_msg(sample_mweb_header());
+        let raw = serialize(&msg);
+        assert_eq!(serialize(&MwebHeaderMsg::from_payload(&raw).unwrap()), raw);
+
+        // Cut inside the MWEB header: relayed block data.
+        let err = MwebHeaderMsg::from_payload(&raw[..raw.len() - 10]).unwrap_err();
+        assert_eq!(
+            err.ban_reason(),
+            Some(crate::error::BanReason::Undecodable),
+            "{err}"
+        );
+        assert!(alloc::format!("{err}").contains("MWEB header"), "{err}");
+
+        // Cut inside the HogEx.
+        let merkle_len = serialize(&msg.merkle).len();
+        let err = MwebHeaderMsg::from_payload(&raw[..merkle_len + 2]).unwrap_err();
+        assert_eq!(
+            err.ban_reason(),
+            Some(crate::error::BanReason::Undecodable),
+            "{err}"
+        );
+        assert!(alloc::format!("{err}").contains("HogEx"), "{err}");
+
+        // Cut inside the merkle proof: the peer's own framing.
+        let err = MwebHeaderMsg::from_payload(&raw[..10]).unwrap_err();
+        assert_eq!(
+            err.ban_reason(),
+            Some(crate::error::BanReason::ProtocolViolation),
+            "{err}"
+        );
     }
 
     /// F-17: `from_indices` allocates `max_index / 8` bytes, so an out-of-range

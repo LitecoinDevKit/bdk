@@ -344,11 +344,7 @@ impl TcpMwebPeer {
         let payloads = self.collect_until_pong("mwebutxos", reqs.len())?;
         let mut out = Vec::with_capacity(payloads.len());
         for payload in payloads {
-            let mut cursor = std::io::Cursor::new(payload);
-            out.push(
-                MwebUtxos::consensus_decode(&mut cursor)
-                    .map_err(|e| Error::protocol(alloc::format!("mwebutxos decode: {e}")))?,
-            );
+            out.push(MwebUtxos::from_payload(&payload)?);
         }
         Ok(out)
     }
@@ -1021,9 +1017,7 @@ impl MwebUtxoSource for TcpMwebPeer {
             let inv: Vec<Inventory> = vec![mweb_inv(MSG_MWEB_HEADER, block_hash)];
             this.send(NetworkMessage::GetData(inv))?;
             let payload = this.recv_until_cmd("mwebheader")?;
-            let mut cursor = std::io::Cursor::new(payload);
-            MwebHeaderMsg::consensus_decode(&mut cursor)
-                .map_err(|e| Error::protocol(alloc::format!("mwebheader decode: {e}")))
+            MwebHeaderMsg::from_payload(&payload)
         })
     }
 

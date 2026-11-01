@@ -6,13 +6,32 @@
 //! they must survive decode before they can be checked.
 
 use bdk_mweb::p2p::MwebHeaderMsg;
+use bdk_mweb::BanReason;
 use honggfuzz::fuzz;
 use litecoin::consensus::encode::{deserialize, serialize};
 
 fn do_test(data: &[u8]) {
+    // The sync path decodes through `from_payload`, whose failure class decides
+    // whether the peer is banned.
+    let classified = MwebHeaderMsg::from_payload(data);
+    if let Err(e) = &classified {
+        assert!(
+            matches!(
+                e.ban_reason(),
+                Some(BanReason::ProtocolViolation | BanReason::Undecodable)
+            ),
+            "unexpected mwebheader decode classification: {e}"
+        );
+    }
+
     let Ok(decoded) = deserialize::<MwebHeaderMsg>(data) else {
         return;
     };
+    assert_eq!(
+        classified.as_ref().ok(),
+        Some(&decoded),
+        "from_payload disagrees with consensus decode"
+    );
 
     // Consensus decode accepts some non-canonical encodings (e.g. non-minimal
     // VarInts). Byte-identity against the original input is therefore not a

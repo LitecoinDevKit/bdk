@@ -244,9 +244,12 @@ impl SyncNotifier for ReadyNotifier {
 /// it for 300s would evict a healthy peer — or, in a single-peer deployment, the
 /// only one there is. Rotate to spread load instead; see
 /// [`PeerPool::with_failover`].
+///
+/// [`BanReason::Undecodable`] is not banworthy either: block data that fails to
+/// decode may mean our decoder is wrong rather than the peer (P-1).
 pub fn is_banworthy_peer_error(err: &Error) -> bool {
     match err.ban_reason() {
-        Some(BanReason::Throttled) | None => false,
+        Some(BanReason::Throttled | BanReason::Undecodable) | None => false,
         Some(_) => true,
     }
 }
@@ -576,22 +579,39 @@ impl PeerPool {
     /// nowhere to rotate to, and the throttle error surfaces to the caller with
     /// its `-whitelist` hint intact instead of being replaced by a ban.
     ///
+    /// A [`BanReason::Undecodable`] failure also rotates without banning. If every
+    /// peer that served data failed that way, the returned error says so: the
+    /// likely fault is the local decoder, not the peers.
+    ///
     /// Prefer this when the closure needs mid-pass state (e.g. checkpoint callbacks) that
     /// cannot be expressed through [`MwebSyncer::run_once_with_pool`].
-    pub fn with_failover<R, F>(&mut self, network: bitcoin::Network, mut f: F) -> Result<R, Error>
+    pub fn with_failover<R, F>(&mut self, network: bitcoin::Network, f: F) -> Result<R, Error>
     where
         F: FnMut(&mut crate::lip0006_tcp::TcpMwebPeer) -> Result<R, Error>,
     {
+        self.failover_with(|pool| pool.connect_next(network), f)
+    }
+
+    /// [`Self::with_failover`] over an arbitrary connector, so the ban and
+    /// rotation rules are testable without sockets.
+    fn failover_with<T, R, C, F>(&mut self, mut connect: C, mut f: F) -> Result<R, Error>
+    where
+        C: FnMut(&mut Self) -> Result<T, Error>,
+        F: FnMut(&mut T) -> Result<R, Error>,
+    {
         let attempts = self.len().max(1);
         let mut last_err = None;
+        let mut served = 0usize;
+        let mut undecodable = 0usize;
         for attempt in 0..attempts {
-            let mut peer = match self.connect_next(network) {
+            let mut peer = match connect(self) {
                 Ok(p) => p,
                 Err(e) => {
                     last_err = Some(e);
                     continue;
                 }
             };
+            served += 1;
             match f(&mut peer) {
                 Ok(r) => return Ok(r),
                 Err(e) => {
@@ -599,6 +619,16 @@ impl PeerPool {
                     if throttled {
                         eprintln!(
                             "warn: peer rate-limited on attempt {}/{} ({e}); rotating without ban",
+                            attempt + 1,
+                            attempts
+                        );
+                        last_err = Some(e);
+                        continue;
+                    }
+                    if e.ban_reason() == Some(BanReason::Undecodable) {
+                        undecodable += 1;
+                        eprintln!(
+                            "warn: peer block data did not decode on attempt {}/{} ({e}); rotating without ban",
                             attempt + 1,
                             attempts
                         );
@@ -618,6 +648,13 @@ impl PeerPool {
                     return Err(e);
                 }
             }
+        }
+        if served > 0 && undecodable == served {
+            let last = last_err.map(|e| alloc::format!("{e}")).unwrap_or_default();
+            return Err(Error::undecodable(alloc::format!(
+                "block data from all {served} peer(s) failed to decode; this points at a local \
+                 decoder bug (bdk_mweb / rust-litecoin), not at the peers. Last error: {last}"
+            )));
         }
         Err(last_err.unwrap_or_else(|| Error::Crypto("MWEB sync failed on all peers".into())))
     }
@@ -1317,6 +1354,78 @@ mod tests {
         assert!(pool.is_banned(addr));
     }
 
+    /// Socket-free stand-in for [`PeerPool::connect_next`]: same round-robin and
+    /// ban skipping, and it records `last_connected` the same way.
+    #[cfg(feature = "std")]
+    fn fake_connect(pool: &mut PeerPool) -> Result<std::net::SocketAddr, Error> {
+        let n = pool.addrs.len();
+        for _ in 0..n {
+            let addr = pool.addrs[pool.next % n];
+            pool.next = pool.next.wrapping_add(1);
+            if pool.is_banned(addr) {
+                continue;
+            }
+            pool.last_connected = Some(addr);
+            return Ok(addr);
+        }
+        Err(Error::Crypto("all peers banned".into()))
+    }
+
+    #[cfg(feature = "std")]
+    fn two_peers() -> (PeerPool, std::net::SocketAddr, std::net::SocketAddr) {
+        let a: std::net::SocketAddr = "127.0.0.1:1".parse().unwrap();
+        let b: std::net::SocketAddr = "127.0.0.1:2".parse().unwrap();
+        (PeerPool::new(vec![a, b]), a, b)
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn undecodable_block_data_rotates_without_ban() {
+        let (mut pool, a, b) = two_peers();
+        let mut seen = Vec::new();
+        let out = pool.failover_with(fake_connect, |addr| {
+            seen.push(*addr);
+            if *addr == a {
+                Err(Error::undecodable("mwebutxos decode: output at leaf 7"))
+            } else {
+                Ok(42)
+            }
+        });
+        assert_eq!(out.unwrap(), 42);
+        assert_eq!(seen, vec![a, b]);
+        assert!(!pool.is_banned(a));
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn undecodable_from_every_peer_points_at_local_decoder() {
+        let (mut pool, a, b) = two_peers();
+        let err = pool
+            .failover_with(fake_connect, |_| {
+                Err::<(), _>(Error::undecodable("mwebheader decode: HogEx"))
+            })
+            .unwrap_err();
+        assert_eq!(err.ban_reason(), Some(BanReason::Undecodable));
+        assert!(format!("{err}").contains("local decoder"), "{err}");
+        assert!(!pool.is_banned(a) && !pool.is_banned(b));
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn framing_failure_still_bans() {
+        let (mut pool, a, b) = two_peers();
+        let out = pool.failover_with(fake_connect, |addr| {
+            if *addr == a {
+                Err(Error::protocol("mwebutxos decode: utxo count exceeds cap"))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(out.is_ok());
+        assert!(pool.is_banned(a));
+        assert!(!pool.is_banned(b));
+    }
+
     /// F-18: classification is typed, not by message wording. Every constructor
     /// class is banworthy; non-peer errors are not, regardless of their text.
     #[test]
@@ -1338,6 +1447,13 @@ mod tests {
             Some(crate::error::BanReason::Throttled)
         );
         assert!(!is_banworthy_peer_error(&throttled));
+        // Undecodable block data may be our decoder's fault (P-1), not the peer's.
+        let undecodable = Error::undecodable("mwebutxos decode: output at leaf 0");
+        assert_eq!(
+            undecodable.ban_reason(),
+            Some(crate::error::BanReason::Undecodable)
+        );
+        assert!(!is_banworthy_peer_error(&undecodable));
         // Wording must NOT be load-bearing: a Crypto error whose message merely
         // resembles a peer failure stays non-banworthy...
         assert!(!is_banworthy_peer_error(&Error::Crypto(

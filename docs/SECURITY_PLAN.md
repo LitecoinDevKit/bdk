@@ -834,7 +834,7 @@ The wallet must be updated and re-pinned for anything marked "breaks".
 | `MwebCoin` | struct literal in wallet tests | F-08d/F-08g change `Drop` and `Debug`, not fields. Literal construction still compiles |
 | `leafset_has_leaf` | `mweb.rs:475` | Unchanged |
 | `MWEB_PEGIN_MATURITY`, `CHANGE_ADDRESS_INDEX` | `mweb.rs:399`, `:1037` | Unchanged |
-| `BanReason` | not matched by the wallet | F-21d adds a `Throttled` variant. The enum is `#[non_exhaustive]`, so additive |
+| `BanReason` | not matched by the wallet | F-21d adds a `Throttled` variant, and the P-1 follow-up adds `Undecodable` (block data that failed to decode; rotate without ban). The enum is `#[non_exhaustive]`, so additive |
 | `DEFAULT_UTXO_BATCH` | not set directly | F-21f raises it 500 → 4096. Value change, not an API break |
 
 - [x] **F-API1** F-18: `is_banworthy_peer_error` (`mweb_sync.rs:216`) classifies
@@ -987,7 +987,7 @@ fixes are in LitecoinDevKit `90fc904`.
 
 | F | Audit | Severity | Summary | Status |
 | --- | --- | --- | --- | --- |
-| F-22 | P-1 | High | Decoder rejected consensus-valid outputs with off-curve Ko/Ke; one mined output would stall every LDK sync | Fixed |
+| F-22 | P-1 | High | Decoder rejected consensus-valid outputs with off-curve Ko/Ke; one mined output would stall every LDK sync | Fixed; relayed block data that fails to decode no longer bans (`BanReason::Undecodable`) |
 | F-23 | R-1 | High | MWEB block skipped when header version bit 29 is clear; a valid block could stall `bdk_bitcoind_rpc` | Fixed |
 | F-24 | R-2 | Medium | MWEB PSBT global key index sized an unbounded allocation | Fixed |
 | F-25 | R-3 | Medium | ltcd PSBTv2 import reserved memory from untrusted counts | Fixed |
