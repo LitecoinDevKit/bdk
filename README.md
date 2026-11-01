@@ -1,29 +1,36 @@
-# The Bitcoin Dev Kit
+# Litecoin Dev Kit
 
 <div align="center">
 
-  <img src="./static/bdk.png" width="220" />
+  <img src="./static/ldk.png" width="220" alt="Litecoin Dev Kit" />
 
   <p>
-    <strong>A suite of libraries for building modern, lightweight, descriptor-based wallets written in Rust!</strong>
+    <strong>Build Litecoin wallets that can send privately.</strong>
   </p>
 
   <p>
-    <a href="https://github.com/bitcoindevkit/bdk/blob/master/LICENSE"><img alt="MIT or Apache-2.0 Licensed" src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg"/></a>
-    <a href="https://github.com/bitcoindevkit/bdk/actions?query=workflow%3ACI"><img alt="CI Status" src="https://github.com/bitcoindevkit/bdk/workflows/CI/badge.svg"></a>
-    <a href="https://coveralls.io/github/bitcoindevkit/bdk?branch=master"><img src="https://coveralls.io/repos/github/bitcoindevkit/bdk/badge.svg?branch=master"/></a>
+    A Litecoin port of <a href="https://bitcoindevkit.org">Bitcoin Dev Kit</a>. Privacy is MWEB: peg in, send on the extension block, peg out.
+  </p>
+
+  <p>
+    <a href="https://github.com/LitecoinDevKit/bdk/blob/litecoin/LICENSE-MIT"><img alt="MIT or Apache-2.0 Licensed" src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg"/></a>
+    <a href="https://github.com/LitecoinDevKit/bdk/actions/workflows/cont_integration.yml?query=branch%3Alitecoin"><img alt="CI Status" src="https://github.com/LitecoinDevKit/bdk/actions/workflows/cont_integration.yml/badge.svg?branch=litecoin"></a>
     <a href="https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/"><img alt="Rustc Version 1.85.0+" src="https://img.shields.io/badge/rustc-1.85.0%2B-lightgrey.svg"/></a>
-    <a href="https://discord.gg/d7NkDKm"><img alt="Chat on Discord" src="https://img.shields.io/discord/753336465005608961?logo=discord"></a>
   </p>
 
   <h4>
-    <a href="https://bitcoindevkit.org">Project Homepage</a>
+    <a href="https://litecoindevkit.com">litecoindevkit.com</a>
+    <span> · </span>
+    <a href="https://github.com/LitecoinDevKit/ldk-wallet">Desktop wallet</a>
+    <span> · </span>
+    <a href="./docs/ADOPTION.md">Adoption guide</a>
   </h4>
 </div>
 
-> **This is a Litecoin fork of BDK (LitecoinDevKit).** Every crate keeps its `bdk_*` name and its
+> **Litecoin Dev Kit (LDK).** Every crate keeps its `bdk_*` name and its
 > `bitcoin::` paths, but the `bitcoin` dependency is aliased to the [`litecoin`] crate, so those
-> paths resolve to Litecoin types.
+> paths resolve to Litecoin types. Upstream owns the `bdk_*` names on crates.io, so consume this
+> fork by git revision.
 >
 > **Integrating a wallet?** Start with **[docs/ADOPTION.md](./docs/ADOPTION.md)** (Rust vs FFI,
 > blessed pins, maps-first MWEB API). Prove it with
@@ -40,33 +47,31 @@
 
 ## About
 
-The `bdk` libraries aim to provide well engineered and reviewed components for Bitcoin wallets and other applications.
-They are built upon the excellent [`rust-bitcoin`] and [`rust-miniscript`] crates.
+These libraries are the Litecoin Dev Kit components for descriptor-based wallets and other applications. They are a port of [Bitcoin Dev Kit](https://bitcoindevkit.org), built on the [`litecoin`] crate and [`rust-miniscript`].
 
 ## Architecture
 
 The workspace in this repository contains several crates in the `/crates` directory:
 
-| Sub-Directory | Description | Badges |
-|---------------|-------------|--------|
-| [`chain`](./crates/chain) | Tools for storing and indexing chain data. | ![Chain Crate Info](https://img.shields.io/crates/v/bdk_chain.svg) ![Chain API Docs](https://img.shields.io/badge/docs.rs-bdk_chain-green) |
-| [`core`](./crates/core) | A collection of core structures used by the [`bdk_chain`], [`bdk_wallet`], and BDK's chain data source crates. | ![Core Crate Info](https://img.shields.io/crates/v/bdk_core.svg) ![Core API Docs](https://img.shields.io/badge/docs.rs-bdk_core-green) |
-| [`esplora`](./crates/esplora) | Extends the [`esplora-client`] crate with methods to fetch chain data from an esplora HTTP server in the form that [`bdk_chain`] and `Wallet` can consume. | ![Esplora Crate Info](https://img.shields.io/crates/v/bdk_esplora.svg) ![Esplora API Docs](https://img.shields.io/badge/docs.rs-bdk_esplora-green) |
-| [`electrum`](./crates/electrum) | Extends the [`electrum-client`] crate with methods to fetch chain data from an electrum server in the form that [`bdk_chain`] and `Wallet` can consume. | ![Electrum Crate Info](https://img.shields.io/crates/v/bdk_electrum.svg) ![Electrum API Docs](https://img.shields.io/badge/docs.rs-bdk_electrum-green) |
-| [`bitcoind_rpc`](./crates/bitcoind_rpc) | Extends Litecoin-aliased [`bitcoincore-rpc`] (vendored under `vendor/bitcoincore-rpc`) for emitting chain data from `litecoind` RPC. | ![BitcoinD RPC Crate Info](https://img.shields.io/crates/v/bdk_bitcoind_rpc.svg) ![BitcoinD RPC API Docs](https://img.shields.io/badge/docs.rs-bdk_bitcoind_rpc-green) |
-| [`file_store`](./crates/file_store) | Persistence backend for storing chain data in a single file. Intended for testing and development purposes, not for production. | ![File Store Crate Info](https://img.shields.io/crates/v/bdk_file_store.svg) ![File Store API Docs](https://img.shields.io/badge/docs.rs-bdk_file_store-green) |
-| [`mweb`](./crates/mweb) | Litecoin MWEB: stealth keys, receive scan, coin DB, peg-in/out and MWEB→MWEB tx authoring (`bdk_mweb`). | |
+| Sub-Directory | Description |
+|---------------|-------------|
+| [`chain`](./crates/chain) | Tools for storing and indexing chain data. |
+| [`core`](./crates/core) | A collection of core structures used by [`bdk_chain`], [`bdk_wallet`], and this repo's chain data source crates. |
+| [`esplora`](./crates/esplora) | Extends the [`esplora-client`] crate with methods to fetch chain data from an esplora HTTP server in the form that [`bdk_chain`] and `Wallet` can consume. |
+| [`electrum`](./crates/electrum) | Extends the [`electrum-client`] crate with methods to fetch chain data from an electrum server in the form that [`bdk_chain`] and `Wallet` can consume. |
+| [`bitcoind_rpc`](./crates/bitcoind_rpc) | Extends Litecoin-aliased [`bitcoincore-rpc`] (vendored under `vendor/bitcoincore-rpc`) for emitting chain data from `litecoind` RPC. |
+| [`file_store`](./crates/file_store) | Persistence backend for storing chain data in a single file. Intended for testing and development purposes, not for production. |
+| [`mweb`](./crates/mweb) | Litecoin MWEB: stealth keys, receive scan, coin DB, peg-in/out and MWEB→MWEB tx authoring (`bdk_mweb`). |
 
 The [`bdk_wallet`] repository and crate contains a higher level `Wallet` type that depends on the above lower-level mechanism crates.
 
-[`litecoin`]: https://crates.io/crates/litecoin
-[`rust-miniscript`]: https://github.com/rust-bitcoin/rust-miniscript
-[`rust-bitcoin`]: https://github.com/rust-bitcoin/rust-bitcoin
-[`esplora-client`]: https://docs.rs/esplora-client/
-[`electrum-client`]: https://docs.rs/electrum-client/
-[`bitcoincore-rpc`]: https://docs.rs/bitcoincore-rpc/
-[`bdk_chain`]: https://docs.rs/bdk-chain/
-[`bdk_wallet`]: https://github.com/bitcoindevkit/bdk_wallet
+[`litecoin`]: https://github.com/LitecoinDevKit/rust-litecoin
+[`rust-miniscript`]: https://github.com/LitecoinDevKit/rust-miniscript
+[`esplora-client`]: https://github.com/IndigoNakamoto/rust-esplora-client
+[`electrum-client`]: https://github.com/LitecoinDevKit/rust-electrum-client
+[`bitcoincore-rpc`]: ./vendor/bitcoincore-rpc
+[`bdk_chain`]: ./crates/chain
+[`bdk_wallet`]: https://github.com/LitecoinDevKit/bdk_wallet
 
 ## Security Policy
 
@@ -74,7 +79,7 @@ To report a security issue, please refer to the [security policy](SECURITY.md).
 
 ## Minimum Supported Rust Version (MSRV)
 
-The following BDK crates maintains a MSRV of 1.85.0. To build these crates with the MSRV of 1.85.0 you will need to pin dependencies by running the [`pin-msrv.sh`](./ci/pin-msrv.sh) script. The MSRV only covers building the libraries; tests and examples need the toolchain in [`rust-version`](./rust-version).
+These crates maintain a MSRV of 1.85.0. To build these crates with the MSRV of 1.85.0 you will need to pin dependencies by running the [`pin-msrv.sh`](./ci/pin-msrv.sh) script. The MSRV only covers building the libraries; tests and examples need the toolchain in [`rust-version`](./rust-version).
 
 - `bdk_core`
 - `bdk_chain`

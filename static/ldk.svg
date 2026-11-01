@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="0 0 500 500">
+  <title>Litecoin Dev Kit</title>
+  <rect width="500" height="500" fill="#07080C"/>
+  <path fill="#8EB0FF" transform="translate(46 162) scale(8.8)" d="M0 0h6v14h8v6H0V0z"/>
+  <text x="214" y="286" fill="#E8EAF0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="108" font-weight="700" letter-spacing="-3">LDK</text>
+</svg>
