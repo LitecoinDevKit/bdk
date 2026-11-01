@@ -627,6 +627,36 @@ pub fn try_node_from_env_with_policy(policy: PeerPolicy) -> Result<Option<Liteco
     }
 }
 
+/// Which relay policy the harness node enforces on loose transactions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayPolicy {
+    /// `-acceptnonstdtxn=1`: consensus checks only.
+    ///
+    /// This also switches off Core's MWEB relay policy (`MWEB::Policy::CheckWeight`
+    /// and `IsStandardTx`: the 4,000-weight and 1,000-input caps, peg-in kernel
+    /// matching, non-standard kernel features), so a test passing here proves
+    /// only that a block containing the tx would be valid, not that it relays.
+    Permissive,
+    /// `-acceptnonstdtxn=0`: the mainnet relay policy, which is also regtest's
+    /// built-in default.
+    Strict,
+}
+
+/// The relay policy selected by `LITECOIND_RELAY_POLICY` (`strict` or
+/// `permissive`; unset means permissive).
+///
+/// Panics on any other value, so a typo in CI cannot silently fall back to the
+/// weaker mode.
+pub fn relay_policy() -> RelayPolicy {
+    match std::env::var("LITECOIND_RELAY_POLICY").as_deref() {
+        Err(_) | Ok("permissive") => RelayPolicy::Permissive,
+        Ok("strict") => RelayPolicy::Strict,
+        Ok(other) => {
+            panic!("LITECOIND_RELAY_POLICY must be `strict` or `permissive`, got {other:?}")
+        }
+    }
+}
+
 /// Whether a caller has demanded that node-backed tests actually run.
 pub fn require_litecoind() -> bool {
     matches!(
@@ -667,7 +697,10 @@ fn spawn_litecoind(
         .arg("-server=1")
         .arg("-txindex=1")
         .arg("-fallbackfee=0.0001")
-        .arg("-acceptnonstdtxn=1")
+        .arg(format!(
+            "-acceptnonstdtxn={}",
+            u8::from(relay_policy() == RelayPolicy::Permissive)
+        ))
         .arg("-mempoolreplacement=1");
     if policy == PeerPolicy::Whitelisted {
         // Match Core functional tests: allow MWEB light-client getdata without bans.

@@ -33,11 +33,13 @@ cargo test -p bdk_mweb --test ltcd_psbt_fixtures
 ```
 
 Layer 3 — live `litecoind` as oracle. Use **your** binary if you have one;
-CI pins Litecoin Core **0.21.5.6**.
+CI pins Litecoin Core **0.21.5.8** and runs every suite under both relay
+policies.
 
 ```bash
 export LITECOIND_EXE=/path/to/litecoind
 export REQUIRE_LITECOIND=1   # skip → hard fail
+export LITECOIND_RELAY_POLICY=strict   # or permissive (the default)
 
 cargo test -p bdk_mweb --all-features --test-threads=1 \
   --test core_seed_parity \
@@ -47,7 +49,12 @@ cargo test -p bdk_mweb --all-features --test-threads=1 \
   --test core_pegin_pegout_roundtrip
 ```
 
-Optional extras (same env): `--test lip0006_sync --test lip0006_p2p --test lip0006_throttle --test mweb_anchoring`.
+Optional extras (same env): `--test lip0006_sync --test lip0006_p2p --test lip0006_throttle --test mweb_anchoring --test core_policy_guardrails`.
+
+`permissive` passes `-acceptnonstdtxn=1`, which proves consensus validity only:
+it also switches off Core's MWEB relay policy (the 4,000-weight and
+1,000-input caps, peg-in kernel matching, non-standard kernels and outputs).
+`strict` is regtest's built-in default and matches mainnet relay.
 
 ---
 
@@ -93,7 +100,12 @@ Port **data**, not Go test logic. Regen (dev machine, not CI):
 
 CI that actually runs this:
 [`.github/workflows/regtest_mweb.yml`](../.github/workflows/regtest_mweb.yml)
-(`REQUIRE_LITECOIND=1`, serial, Core 0.21.5.6 pinned by SHA256).
+(`REQUIRE_LITECOIND=1`, serial, Core 0.21.5.8 pinned by SHA256, strict and
+permissive relay policy). All suites passed locally on 0.21.5.8 in both modes
+on 2026-10-31.
+
+The 2026 Core-alignment audit (0.21.5.5 through 0.21.5.8) and its open
+findings are tracked in [`audit/mweb-core-alignment.md`](audit/mweb-core-alignment.md).
 
 ### 4. Transparent live stack (Electrum-first)
 

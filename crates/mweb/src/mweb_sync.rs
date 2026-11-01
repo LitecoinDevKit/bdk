@@ -1621,6 +1621,80 @@ mod tests {
         (source.utxo_calls, state)
     }
 
+    /// P-6: a coin marked spent locally (as the FFI asks after a broadcast) whose
+    /// spend is never mined keeps its leaf in the chain's leafset. A differential
+    /// pass only fetches newly added leaves, so the coin stays hidden until a
+    /// full resync.
+    #[cfg(feature = "std")]
+    #[test]
+    #[ignore = "P-6 red test: locally marked spends are never reconciled against the leafset"]
+    fn differential_sync_restores_coin_whose_spend_never_confirmed() {
+        use crate::keys::{MasterKeyScheme, MasterKeys};
+
+        let secp = Secp256k1::new();
+        let keys = MasterKeys::from_seed(
+            &[7u8; 64],
+            bitcoin::Network::Regtest,
+            MasterKeyScheme::LitecoinCore,
+            &secp,
+        )
+        .unwrap();
+        let book = AddressBook::from_keys(&keys, 2, &secp).unwrap();
+        let hash_a = BlockHash::from_byte_array([0xaa; 32]);
+        let hash_b = BlockHash::from_byte_array([0xbb; 32]);
+        let mut state = SyncState {
+            tip_hash: Some(hash_a),
+            tip_height: Some(10),
+            leafset: MwebLeafset::from_indices(hash_a, &[0, 1, 2]).leafset,
+            ..SyncState::default()
+        };
+        let mut db = MwebCoinDatabase::new();
+        db.insert(MwebCoin {
+            output_id: [9; 32],
+            commitment: [0; 33],
+            amount: 50_000,
+            address_index: 0,
+            blind: [0; 32],
+            shared_secret: [0; 32],
+            spend_key: Some([1; 32]),
+            block_height: Some(9),
+            is_pegin: false,
+            leaf_index: Some(1),
+        });
+        assert!(db.mark_spent(&[9; 32]));
+
+        // Next block: leaf 1 is still unspent on chain.
+        let mut source = CountingSource {
+            leafset: MwebLeafset::from_indices(hash_b, &[0, 1, 2, 3]),
+            utxo_calls: 0,
+        };
+        let mut headers = FixedHeaderProvider::tip_only(hash_b, 11);
+        headers.hashes.insert(10, hash_a);
+        let syncer = MwebSyncer {
+            verify: crate::lip0006::VerifyMode::Trusted,
+            ..MwebSyncer::tip_only()
+        };
+        syncer
+            .run_once(
+                &headers,
+                &mut ReadyNotifier { tip_height: 11 },
+                &mut source,
+                &mut state,
+                &keys,
+                &book,
+                &mut db,
+                &secp,
+                None,
+            )
+            .unwrap();
+
+        assert!(
+            db.get(&[9; 32]).is_some(),
+            "coin whose leaf is unspent on chain is still hidden"
+        );
+        assert_eq!(db.balance(), 50_000);
+    }
+
     #[cfg(feature = "std")]
     #[test]
     fn tip_extension_keeps_leafset_and_diffs_only_new_leaves() {

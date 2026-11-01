@@ -32,15 +32,22 @@ env:
   # Litecoin Core release providing MWEB. Bump deliberately: the tests assert on
   # consensus behaviour (HogEx commitment layout, peg-in maturity, the 675-byte
   # bulletproof), so a version change is a real change in what is being tested.
-  LITECOIN_VERSION: 0.21.5.6
-  LITECOIN_SHA256: 3c0a217651a431ef446641669a0b74ce7dbcd9b9ed1a118fc830b8f6779ee83f
+  LITECOIN_VERSION: 0.21.5.8
+  LITECOIN_SHA256: 43200c9f9d65ebc126ea5833ca9429e144c4b3273da6bb9f4e89fd7450ab1be9
 
 jobs:
   regtest-mweb:
-    name: litecoind-backed mweb tests
+    name: litecoind-backed mweb tests (${{ matrix.relay_policy }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # `permissive` proves the txs are consensus-valid; `strict` proves they
+        # also pass the mainnet relay policy (MWEB weight/input caps, standard
+        # kernels), which permissive mode switches off entirely.
+        relay_policy: [permissive, strict]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -90,6 +97,7 @@ jobs:
         env:
           LITECOIND_EXE: /home/runner/litecoin-bin/litecoind
           REQUIRE_LITECOIND: '1'
+          LITECOIND_RELAY_POLICY: ${{ matrix.relay_policy }}
           RUST_BACKTRACE: '1'
         run: |
           set -euo pipefail
@@ -100,6 +108,7 @@ jobs:
                                     --test core_seed_parity \
                                     --test core_spend \
                                     --test core_pegin_pegout_roundtrip \
+                                    --test core_policy_guardrails \
                                     --test lip0006_sync \
                                     --test lip0006_p2p \
                                     --test lip0006_throttle \
@@ -107,5 +116,6 @@ jobs:
                                     -- --test-threads=1 --nocapture
 
       - name: Run the suites that need no node
+        if: matrix.relay_policy == 'permissive'
         working-directory: ./crates/mweb
         run: cargo test --all-features --lib --test pmmr_adversarial

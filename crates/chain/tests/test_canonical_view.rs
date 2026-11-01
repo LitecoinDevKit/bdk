@@ -961,6 +961,67 @@ fn test_mature_coinbase_is_settled_not_immature() {
     assert_eq!(by_op[&OutPoint::new(txid, 0)], Eligibility::Settled);
 }
 
+/// P-3: Litecoin Core enforces `PEGOUT_MATURITY = 6` in consensus
+/// (`Consensus::CheckTxInputs`): a HogEx peg-out output (any `vout` after the
+/// v8 HogAddr at index 0) cannot be spent until it has 6 confirmations. The
+/// HogAddr script is the marker because Esplora does not report `is_hog_ex`.
+#[test]
+#[ignore = "P-3 red test: is_mature only knows coinbase, not HogEx peg-outs"]
+fn test_hogex_pegout_is_immature_for_six_blocks() {
+    use bitcoin::{WitnessProgram, WitnessVersion};
+
+    let blocks: BTreeMap<u32, BlockHash> = [(0, hash!("g")), (1, hash!("b1")), (2, hash!("tip"))]
+        .into_iter()
+        .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+
+    let hog_addr = ScriptBuf::new_witness_program(
+        &WitnessProgram::new(WitnessVersion::V8, &[0x11; 32]).unwrap(),
+    );
+    let hogex = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("prev_hogex"), 0),
+            ..Default::default()
+        }],
+        output: vec![
+            TxOut {
+                value: Amount::from_sat(1_000_000_000),
+                script_pubkey: hog_addr,
+            },
+            TxOut {
+                value: Amount::from_sat(30_000_000),
+                script_pubkey: ScriptBuf::new(),
+            },
+        ],
+        is_hog_ex: false,
+        ..new_tx(0)
+    };
+    let txid = hogex.compute_txid();
+    let _ = tx_graph.insert_tx(hogex);
+    let _ = tx_graph.insert_anchor(
+        txid,
+        ConfirmationBlockTime {
+            block_id: chain.get(1).unwrap().block_id(),
+            confirmation_time: 100,
+        },
+    );
+
+    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let tip_height = view.tip().height;
+    let by_op = view
+        .classify_outpoints(
+            [OutPoint::new(txid, 1)],
+            |_| false,
+            settled(tip_height, 1),
+            |_| false,
+        )
+        .map(|(txout, e)| (txout.outpoint, e))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    assert_eq!(by_op[&OutPoint::new(txid, 1)], Eligibility::Immature);
+}
+
 /// An unconfirmed chain whose root parent tx is missing from the Canonical set is
 /// `Unsettled(Unknown)`.
 #[test]
