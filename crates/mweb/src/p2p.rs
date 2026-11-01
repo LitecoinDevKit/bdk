@@ -638,11 +638,9 @@ mod tests {
         }
     }
 
-    /// An output that does not decode is block data the peer only relayed, so it
-    /// classifies as `Undecodable` (no ban); the envelope around it stays a
-    /// protocol violation.
     #[test]
-    fn utxos_from_payload_classifies_output_failures_as_undecodable() {
+    #[cfg_attr(miri, ignore = "builds a secp256k1 key, which Miri cannot run")]
+    fn utxos_from_payload_roundtrips() {
         let batch = MwebUtxos {
             block_hash: BlockHash::from_byte_array([7u8; 32]),
             start_index: 0,
@@ -653,10 +651,26 @@ mod tests {
             }],
             parent_hashes: Vec::new(),
         };
-        let raw = serialize(&batch);
-        assert_eq!(MwebUtxos::from_payload(&raw).unwrap(), batch);
+        assert_eq!(MwebUtxos::from_payload(&serialize(&batch)).unwrap(), batch);
+    }
 
-        let err = MwebUtxos::from_payload(&raw[..raw.len() - 100]).unwrap_err();
+    /// An output that does not decode is block data the peer only relayed, so it
+    /// classifies as `Undecodable` (no ban); the envelope around it stays a
+    /// protocol violation.
+    ///
+    /// The output is cut inside its commitment, before the sender key, so no
+    /// secp256k1 call is reached and the test also runs under Miri.
+    #[test]
+    fn utxos_from_payload_classifies_output_failures_as_undecodable() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&[7u8; 32]); // block_hash
+        raw.push(0); // start_index
+        raw.push(OUTPUT_FORMAT_FULL);
+        raw.push(1); // one utxo
+        raw.push(3); // leaf_index
+        raw.extend_from_slice(&[8u8; 10]); // first 10 of 33 commitment bytes
+
+        let err = MwebUtxos::from_payload(&raw).unwrap_err();
         assert_eq!(
             err.ban_reason(),
             Some(crate::error::BanReason::Undecodable),
