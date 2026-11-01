@@ -434,8 +434,8 @@ impl MwebCoinDatabase {
                 continue;
             }
             #[cfg(all(feature = "zkp", feature = "std"))]
-            if crate::crypto::switch_commit(&coin.blind, coin.amount, &secp)
-                .map_or(true, |c| c != coin.commitment)
+            if crate::crypto::switch_commit(&coin.blind, coin.amount, &secp).ok()
+                != Some(coin.commitment)
             {
                 self.rejected.push(id);
                 continue;
