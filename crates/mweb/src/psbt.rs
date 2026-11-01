@@ -61,11 +61,11 @@ pub fn mweb_input_from_wire(input: &Input) -> MwebInput {
 pub fn mweb_output_from_wire(output: &Output) -> MwebOutput {
     MwebOutput {
         commit: Some(output.commitment),
-        output_pubkey: Some(output.receiver_public_key.serialize().to_vec()),
+        output_pubkey: Some(output.receiver_public_key.to_vec()),
         sender_pubkey: Some(output.sender_public_key.serialize().to_vec()),
         features: Some(output.message.features),
         standard_fields: output.message.standard_fields.as_ref().map(|sf| {
-            let mut v = sf.key_exchange_pubkey.serialize().to_vec();
+            let mut v = sf.key_exchange_pubkey.to_vec();
             v.push(sf.view_tag);
             v.extend_from_slice(&sf.masked_value.to_le_bytes());
             v.extend_from_slice(&sf.masked_nonce);

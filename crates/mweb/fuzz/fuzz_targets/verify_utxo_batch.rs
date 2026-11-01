@@ -38,7 +38,7 @@ fn output_from(c: &mut Cursor, pk: PublicKey) -> Output {
     Output {
         commitment,
         sender_public_key: pk,
-        receiver_public_key: pk,
+        receiver_public_key: pk.serialize(),
         message: OutputMessage {
             features: c.u8(),
             standard_fields: None,

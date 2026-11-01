@@ -8,7 +8,10 @@
 use alloc::vec::Vec;
 
 use bitcoin::blockdata::transaction;
-use bitcoin::psbt::mweb::{MwebInput, MwebKernel, MwebOutput};
+use bitcoin::psbt::mweb::{
+    MwebInput, MwebKernel, MwebOutput, MAX_MWEB_PSBT_INPUTS, MAX_MWEB_PSBT_KERNELS,
+    MAX_MWEB_PSBT_OUTPUTS,
+};
 use bitcoin::psbt::Psbt;
 use bitcoin::Transaction;
 
@@ -57,13 +60,13 @@ pub fn psbt_from_ltcd_v2(bytes: &[u8]) -> Result<Psbt, Error> {
                 tx_version = u32::from_le_bytes(value.try_into().unwrap());
             }
             GLOBAL_INPUT_COUNT if key_data.is_empty() => {
-                input_count = read_varint(value)? as usize;
+                input_count = read_count(value, MAX_MWEB_PSBT_INPUTS, "input")?;
             }
             GLOBAL_OUTPUT_COUNT if key_data.is_empty() => {
-                output_count = read_varint(value)? as usize;
+                output_count = read_count(value, MAX_MWEB_PSBT_OUTPUTS, "output")?;
             }
             GLOBAL_MWEB_KERNEL_COUNT if key_data.is_empty() => {
-                kernel_count = read_varint(value)? as usize;
+                kernel_count = read_count(value, MAX_MWEB_PSBT_KERNELS, "kernel")?;
             }
             GLOBAL_MWEB_TX_OFFSET if key_data.is_empty() && value.len() == 32 => {
                 let mut off = [0u8; 32];
@@ -85,7 +88,9 @@ pub fn psbt_from_ltcd_v2(bytes: &[u8]) -> Result<Psbt, Error> {
         )));
     }
 
-    let mut mweb_inputs = Vec::with_capacity(input_count);
+    // Every map section is at least its one-byte separator, so the bytes left
+    // bound how many sections can really follow, whatever the counts claim.
+    let mut mweb_inputs = Vec::with_capacity(input_count.min(r.len()));
     for _ in 0..input_count {
         let (map, rest) = read_map_section(r)?;
         r = rest;
@@ -96,7 +101,7 @@ pub fn psbt_from_ltcd_v2(bytes: &[u8]) -> Result<Psbt, Error> {
         mweb_inputs.push(inp);
     }
 
-    let mut mweb_outputs = Vec::with_capacity(output_count);
+    let mut mweb_outputs = Vec::with_capacity(output_count.min(r.len()));
     for _ in 0..output_count {
         let (map, rest) = read_map_section(r)?;
         r = rest;
@@ -110,7 +115,7 @@ pub fn psbt_from_ltcd_v2(bytes: &[u8]) -> Result<Psbt, Error> {
         mweb_outputs.push(out);
     }
 
-    let mut mweb_kernels = Vec::with_capacity(kernel_count);
+    let mut mweb_kernels = Vec::with_capacity(kernel_count.min(r.len()));
     for _ in 0..kernel_count {
         let (map, rest) = read_map_section(r)?;
         r = rest;
@@ -186,6 +191,17 @@ fn read_varbytes(r: &[u8]) -> Result<(&[u8], &[u8]), Error> {
         return Err(Error::Crypto("ltcd PSBT: truncated varbytes".into()));
     }
     Ok((&r[..len], &r[len..]))
+}
+
+/// A section count no consensus-valid MWEB transaction can exceed.
+fn read_count(value: &[u8], max: usize, what: &str) -> Result<usize, Error> {
+    let n = read_varint(value)?;
+    if n > max as u64 {
+        return Err(Error::Crypto(format!(
+            "ltcd PSBT: {what} count {n} exceeds {max}"
+        )));
+    }
+    Ok(n as usize)
 }
 
 fn read_varint(value: &[u8]) -> Result<u64, Error> {

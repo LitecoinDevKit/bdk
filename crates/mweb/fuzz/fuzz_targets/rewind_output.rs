@@ -47,10 +47,22 @@ fn pubkey_from(c: &mut Cursor) -> Option<PublicKey> {
     Some(PublicKey::from_secret_key(&Secp256k1::new(), &sk))
 }
 
+/// Ko and Ke as consensus sees them: usually a real point, sometimes raw bytes
+/// that need not be one.
+fn key_bytes_from(c: &mut Cursor) -> Option<[u8; 33]> {
+    if c.u8() & 1 == 1 {
+        let mut k = [0u8; 33];
+        k[0] = 0x02 | (c.u8() & 1);
+        k[1..].copy_from_slice(&c.arr32());
+        return Some(k);
+    }
+    pubkey_from(c).map(|pk| pk.serialize())
+}
+
 fn structured_output(c: &mut Cursor) -> Option<Output> {
-    let ke = pubkey_from(c)?;
+    let ke = key_bytes_from(c)?;
     let sender = pubkey_from(c)?;
-    let receiver = pubkey_from(c)?;
+    let receiver = key_bytes_from(c)?;
     let mut commitment = [0u8; 33];
     commitment[..32].copy_from_slice(&c.arr32());
     commitment[32] = c.u8() % 2 + 8; // plausible Pedersen prefix (0x08/0x09)

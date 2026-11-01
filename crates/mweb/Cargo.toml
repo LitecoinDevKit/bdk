@@ -79,5 +79,9 @@ name = "capture_mwebheader"
 required-features = ["lip0006"]
 
 [[example]]
+name = "scan_mweb_utxo_keys"
+required-features = ["lip0006"]
+
+[[example]]
 name = "scan_mweb_blocks_decode"
 required-features = ["lip0006"]

@@ -45,7 +45,7 @@ impl HostileSource<'_> {
         Output {
             commitment,
             sender_public_key: self.pk,
-            receiver_public_key: self.pk,
+            receiver_public_key: self.pk.serialize(),
             message: OutputMessage {
                 features: 0,
                 standard_fields: None,

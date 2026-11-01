@@ -511,7 +511,7 @@ pub fn create_output_with_sender(
     let message = OutputMessage {
         features,
         standard_fields: Some(OutputMessageStandardFields {
-            key_exchange_pubkey: ke,
+            key_exchange_pubkey: ke.serialize(),
             view_tag,
             masked_value: mv,
             masked_nonce: mn,
@@ -538,7 +538,7 @@ pub fn create_output_with_sender(
         Output {
             commitment,
             sender_public_key: ks,
-            receiver_public_key: ko,
+            receiver_public_key: ko.serialize(),
             message,
             range_proof,
             signature,
@@ -687,10 +687,12 @@ pub fn create_kernel(
 pub fn shared_secret_and_spend_for_owned(
     keys: &MasterKeys,
     index: u32,
-    ke: &PublicKey,
-    ko: &PublicKey,
+    ke: &[u8; 33],
+    ko: &[u8; 33],
     secp: &Secp256k1<All>,
 ) -> Result<([u8; 32], [u8; 32]), Error> {
+    let ke = PublicKey::from_slice(ke)?;
+    let ko = PublicKey::from_slice(ko)?;
     let scan_scalar =
         Scalar::from_be_bytes(keys.scan.secret_bytes()).map_err(|_| Error::InvalidTweak)?;
     let shared_point = ke.mul_tweak(secp, &scan_scalar)?;
@@ -699,7 +701,7 @@ pub fn shared_secret_and_spend_for_owned(
     let out_key_scalar = Scalar::from_be_bytes(out_key).map_err(|_| Error::InvalidTweak)?;
     let b_i = keys.spend_key_at(index)?;
     let expected_ko = PublicKey::from_secret_key(secp, &b_i).mul_tweak(secp, &out_key_scalar)?;
-    if expected_ko != *ko {
+    if expected_ko != ko {
         return Err(Error::Crypto("owned output Ko mismatch".into()));
     }
     let spend = b_i.mul_tweak(&out_key_scalar)?.secret_bytes();

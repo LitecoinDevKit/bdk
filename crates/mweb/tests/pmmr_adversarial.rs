@@ -51,7 +51,7 @@ fn output(tag: u8) -> Output {
     Output {
         commitment: [tag; 33],
         sender_public_key: pk,
-        receiver_public_key: pk,
+        receiver_public_key: pk.serialize(),
         message: OutputMessage {
             features: 0,
             standard_fields: None,
@@ -411,7 +411,7 @@ fn batch_rejects_any_single_byte_output_mutation() {
             o.sender_public_key = other_pubkey()
         }),
         ("receiver_public_key", |o| {
-            o.receiver_public_key = other_pubkey()
+            o.receiver_public_key = other_pubkey().serialize()
         }),
         // Only covered by the hash when the feature bit is set, so set it.
         ("extra_data", |o| {

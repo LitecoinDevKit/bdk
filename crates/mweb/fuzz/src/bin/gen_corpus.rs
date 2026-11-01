@@ -151,6 +151,49 @@ fn main() {
         );
     }
 
+    // decode_mweb_utxos: the same batch with Ko, then Ke, replaced by a 0x02
+    // encoding with no point on the curve. Core consensus accepts both (only
+    // relay policy checks them), so peers can serve them (audit finding P-1).
+    let output: litecoin::blockdata::mimblewimble::Output =
+        deserialize(&outputs[0].1).expect("fixture decodes");
+    let mut off_curve = [0u8; 33];
+    off_curve[0] = 0x02;
+    off_curve[32] = (1u8..=255)
+        .find(|x| {
+            off_curve[32] = *x;
+            litecoin::secp256k1::PublicKey::from_slice(&off_curve).is_err()
+        })
+        .expect("half of all x values are off the curve");
+    let ke = output
+        .message
+        .standard_fields
+        .as_ref()
+        .map(|f| f.key_exchange_pubkey);
+    let msg = MwebUtxos {
+        block_hash: block_hash(),
+        start_index: 0,
+        output_format: OUTPUT_FORMAT_FULL,
+        utxos: vec![MwebUtxoEntry {
+            leaf_index: 0,
+            output: output.clone(),
+        }],
+        parent_hashes: vec![[0u8; 32]],
+    };
+    let honest = serialize(&msg);
+    for (name, key) in [
+        ("offcurve_ko", Some(output.receiver_public_key)),
+        ("offcurve_ke", ke),
+    ] {
+        let Some(key) = key else { continue };
+        let at = honest
+            .windows(33)
+            .position(|w| w == key)
+            .expect("key in batch");
+        let mut patched = honest.clone();
+        patched[at..at + 33].copy_from_slice(&off_curve);
+        write_seed("decode_mweb_utxos", &format!("{name}.bin"), &patched);
+    }
+
     // decode_mweb_leafset: empty, small, and multi-byte bitsets.
     for (name, indices) in [
         ("empty", &[][..]),

@@ -1884,7 +1884,7 @@ mod tests {
                 output: bitcoin::blockdata::mimblewimble::Output {
                     commitment: [3u8; 33],
                     sender_public_key: pk,
-                    receiver_public_key: pk,
+                    receiver_public_key: pk.serialize(),
                     message: bitcoin::blockdata::mimblewimble::OutputMessage {
                         features: 0,
                         standard_fields: None,
@@ -1962,7 +1962,7 @@ mod tests {
         Output {
             commitment: [tag; 33],
             sender_public_key: pk,
-            receiver_public_key: pk,
+            receiver_public_key: pk.serialize(),
             message: bitcoin::blockdata::mimblewimble::OutputMessage {
                 features: 0,
                 standard_fields: None,

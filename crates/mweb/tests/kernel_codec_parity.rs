@@ -6,8 +6,7 @@
 //! is bit-driven in both directions, so the two agree exactly when every set bit
 //! has a non-empty field. `core_kernel_bytes` models Core's writer.
 //!
-//! Tests marked `#[ignore]` assert the behaviour we want and fail today; each
-//! names the audit finding it pins.
+//! Each test names the audit finding it pins.
 
 use bdk_mweb::hash::blake3_hash;
 use bdk_mweb::kernel_id;
@@ -154,7 +153,6 @@ fn extract_kernel(map: MwebKernel) -> Result<Kernel, bitcoin::psbt::Error> {
 /// P-5: a fee above `i64::MAX` wraps negative in `wire_kernel_from_map`, and
 /// `write_amount` encodes any negative value as one byte.
 #[test]
-#[ignore = "P-5 red test: PSBT extract casts the kernel fee with `as i64`"]
 fn extract_rejects_fee_above_i64_max() {
     let fee = i64::MAX as u64 + 2;
     let res = extract_kernel(kernel_map(Some(FEE | STEALTH), Some(fee)));
@@ -169,7 +167,6 @@ fn extract_rejects_fee_above_i64_max() {
 /// the struct but dropped from the wire bytes the kernel signature is checked
 /// against.
 #[test]
-#[ignore = "P-5 red test: missing kernel features default to 0 instead of being derived or rejected"]
 fn extract_does_not_drop_fields_when_features_missing() {
     let k = extract_kernel(kernel_map(None, Some(1_000_000))).unwrap();
     let reparsed: Kernel = deserialize(&serialize(&k)).unwrap();
@@ -182,7 +179,6 @@ fn extract_does_not_drop_fields_when_features_missing() {
 /// P-5: the extractor will emit the empty-pegout encoding that Core rejects in
 /// consensus from mainnet height 3,154,440 (and from genesis on regtest).
 #[test]
-#[ignore = "P-5 red test: extract emits soft-fork-invalid kernel encodings"]
 fn extract_rejects_pegout_bit_without_pegouts() {
     let res = extract_kernel(kernel_map(Some(FEE | PEGOUT | STEALTH), Some(1_000)));
     assert!(
@@ -194,7 +190,6 @@ fn extract_rejects_pegout_bit_without_pegouts() {
 /// P-5: `pegout_coin_from_psbt_value` accepts an empty script, which the wire
 /// decoder (and Core's `PegOutCoin` unserialize) reject.
 #[test]
-#[ignore = "P-5 red test: PSBT peg-out values with an empty script are accepted"]
 fn extract_rejects_empty_pegout_script() {
     let empty = pegout_psbt_value(&PegOutCoin {
         amount: 1_000,
@@ -224,7 +219,6 @@ fn output_map(features: Option<u8>, standard_fields_len: usize) -> MwebOutput {
 /// standard-fields feature bit stays set, so the encoder writes a message the
 /// decoder (and Core) will mis-parse.
 #[test]
-#[ignore = "P-5 red test: short standard_fields are dropped instead of rejected"]
 fn extract_rejects_truncated_standard_fields() {
     let res = assemble_mw_tx([0; 32], [0; 32], &[], &[output_map(Some(0x01), 57)], &[]);
     assert!(
@@ -239,7 +233,6 @@ fn extract_rejects_truncated_standard_fields() {
 /// round-trip. The extractor produces exactly that when the map has no
 /// features key.
 #[test]
-#[ignore = "P-5 red test: OutputMessage encode is presence-driven, decode is bit-driven"]
 fn output_message_round_trips_when_features_missing() {
     let tx = assemble_mw_tx([0; 32], [0; 32], &[], &[output_map(None, 58)], &[]).unwrap();
     let msg = &tx.body.outputs[0].message;

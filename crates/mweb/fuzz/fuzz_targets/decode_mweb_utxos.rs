@@ -25,9 +25,12 @@ fn do_test(data: &[u8]) {
     // consensus decode; only require the canonical form to be stable.
     let reserialized = serialize(&decoded);
     if reserialized != data {
-        let again: MwebUtxos = deserialize(&reserialized)
-            .expect("canonical mwebutxos encoding must decode");
-        assert_eq!(again, decoded, "canonical mwebutxos re-decode changed value");
+        let again: MwebUtxos =
+            deserialize(&reserialized).expect("canonical mwebutxos encoding must decode");
+        assert_eq!(
+            again, decoded,
+            "canonical mwebutxos re-decode changed value"
+        );
         assert_eq!(
             serialize(&again),
             reserialized,
@@ -82,7 +85,7 @@ mod tests {
                         output: Output {
                             commitment: [i as u8; 33],
                             sender_public_key: pk,
-                            receiver_public_key: pk,
+                            receiver_public_key: pk.serialize(),
                             message: OutputMessage {
                                 features: 0,
                                 standard_fields: None,
@@ -102,6 +105,23 @@ mod tests {
                 };
                 super::do_test(&serialize(&msg));
             }
+        }
+    }
+
+    /// Consensus accepts outputs whose Ko or Ke is not a curve point, so a
+    /// batch carrying one must decode and round-trip like any other.
+    #[test]
+    fn off_curve_seeds_decode() {
+        for name in ["offcurve_ko.bin", "offcurve_ke.bin"] {
+            let path = format!(
+                "{}/hfuzz_input/decode_mweb_utxos/input/{name}",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let bytes = std::fs::read(&path).unwrap();
+            let decoded: super::MwebUtxos =
+                litecoin::consensus::encode::deserialize(&bytes).expect(name);
+            assert_eq!(decoded.utxos.len(), 1);
+            super::do_test(&bytes);
         }
     }
 

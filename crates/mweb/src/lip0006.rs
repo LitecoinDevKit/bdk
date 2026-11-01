@@ -494,7 +494,7 @@ mod tests {
                     output: bitcoin::blockdata::mimblewimble::Output {
                         commitment: [0u8; 33],
                         sender_public_key: dummy_pubkey(),
-                        receiver_public_key: dummy_pubkey(),
+                        receiver_public_key: dummy_pubkey().serialize(),
                         message: bitcoin::blockdata::mimblewimble::OutputMessage {
                             features: 0,
                             standard_fields: None,

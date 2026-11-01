@@ -75,7 +75,14 @@ fn go_unsigned_psbt_deserializes_and_has_stealth() {
 #[test]
 fn go_extract_valid_mweb_psbt() {
     let psbt_bytes = fixture_b64("psbt_extract_valid_mweb.base64");
-    let psbt = psbt_from_ltcd_v2(&psbt_bytes).expect("ingest");
+    let mut psbt = psbt_from_ltcd_v2(&psbt_bytes).expect("ingest");
+    // The Go fixture declares input features 0 but carries an input pubkey. A
+    // bit-driven encoder (ltcd's, Core's, ours) would drop that key from the
+    // wire, so extract refuses the map until the stealth-key bit is set.
+    assert_eq!(psbt.mweb_inputs[0].features, Some(0));
+    assert!(psbt.mweb_inputs[0].input_pubkey.is_some());
+    assert!(extract_tx_with_mweb(&psbt).is_err());
+    psbt.mweb_inputs[0].features = Some(0x01);
     let tx = extract_tx_with_mweb(&psbt).expect("extract minimal finalized");
     let mw = tx.mw_tx.as_ref().unwrap();
     assert_eq!(mw.body.inputs.len(), 1);
@@ -104,4 +111,34 @@ fn kernel_all_fields_roundtrip() {
     assert_eq!(back.excess_commit, pk.excess_commit);
     assert_eq!(back.stealth_commit, pk.stealth_commit);
     assert_eq!(back.pegouts, pk.pegouts);
+}
+
+/// A v2 PSBT whose global input/output/kernel count is `count`, with no sections behind it.
+fn v2_psbt_claiming(count_type: u8, count: &[u8]) -> Vec<u8> {
+    let mut b = b"psbt\xff".to_vec();
+    b.extend([0x01, 0xfb, 0x04, 0x02, 0x00, 0x00, 0x00]); // version 2
+    b.extend([0x01, count_type, count.len() as u8]);
+    b.extend(count);
+    b.push(0x00); // global separator
+    b
+}
+
+/// Section counts are untrusted: they must be checked, not used to size allocations.
+#[test]
+fn ltcd_v2_rejects_untrusted_section_counts() {
+    for count_type in [0x04, 0x05, 0x92] {
+        let huge = v2_psbt_claiming(
+            count_type,
+            &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+        );
+        assert!(
+            psbt_from_ltcd_v2(&huge).is_err(),
+            "u64::MAX count, type {count_type:#04x}"
+        );
+        let in_range = v2_psbt_claiming(count_type, &[0xfd, 0x10, 0x27]); // 10,000
+        assert!(
+            psbt_from_ltcd_v2(&in_range).is_err(),
+            "missing sections, type {count_type:#04x}"
+        );
+    }
 }

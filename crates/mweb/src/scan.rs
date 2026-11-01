@@ -110,7 +110,7 @@ pub fn output_id(output: &mweb::Output) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
     hasher.update(&output.commitment);
     hasher.update(&output.sender_public_key.serialize());
-    hasher.update(&output.receiver_public_key.serialize());
+    hasher.update(&output.receiver_public_key);
     hasher.update(&msg_hash);
     hasher.update(&proof_hash);
     hasher.update(&output.signature);
@@ -132,8 +132,11 @@ pub fn rewind_output(
         return Ok(None);
     }
 
-    let ke = fields.key_exchange_pubkey;
-    let ko = output.receiver_public_key;
+    // Consensus accepts outputs whose Ke or Ko is not a curve point; nobody can
+    // have sent those to us (Core `Keychain::RewindOutput`).
+    let (Ok(ke), Ok(ko)) = (fields.key_exchange_key(), output.receiver_key()) else {
+        return Ok(None);
+    };
 
     // shared_point = a · Ke
     let scan_scalar =
@@ -372,7 +375,7 @@ mod tests {
         let mut v = Vec::new();
         v.extend_from_slice(&out.commitment);
         v.extend_from_slice(&out.sender_public_key.serialize());
-        v.extend_from_slice(&out.receiver_public_key.serialize());
+        v.extend_from_slice(&out.receiver_public_key);
         v.extend_from_slice(&serialize(&out.message));
         v
     }
@@ -412,12 +415,12 @@ mod tests {
         off += 33;
         let sender_public_key = PublicKey::from_slice(&raw[off..off + 33]).unwrap();
         off += 33;
-        let receiver_public_key = PublicKey::from_slice(&raw[off..off + 33]).unwrap();
+        let receiver_public_key: [u8; 33] = raw[off..off + 33].try_into().unwrap();
         off += 33;
         let features = raw[off];
         off += 1;
         assert_eq!(features, 1);
-        let ke = PublicKey::from_slice(&raw[off..off + 33]).unwrap();
+        let ke: [u8; 33] = raw[off..off + 33].try_into().unwrap();
         off += 33;
         let view_tag = raw[off];
         off += 1;
@@ -486,7 +489,7 @@ mod tests {
         let mut hasher = blake3::Hasher::new();
         hasher.update(&output.commitment);
         hasher.update(&output.sender_public_key.serialize());
-        hasher.update(&output.receiver_public_key.serialize());
+        hasher.update(&output.receiver_public_key);
         hasher.update(&msg_hash);
         hasher.update(&proof_hash);
         let msg32 = *hasher.finalize().as_bytes();
@@ -580,7 +583,7 @@ mod tests {
         let spend = coin.spend_key.expect("spend key");
         let sk = bitcoin::secp256k1::SecretKey::from_slice(&spend).unwrap();
         let got = PublicKey::from_secret_key(&secp, &sk);
-        assert_eq!(got, output.receiver_public_key);
+        assert_eq!(got.serialize(), output.receiver_public_key);
 
         let go_out: mweb::Output = deserialize(&raw).unwrap();
         let go_coin = rewind_output(&keys, &book, &go_out, &secp)
@@ -616,9 +619,46 @@ mod tests {
         let spend = coin.spend_key.expect("spend key");
         let sk = bitcoin::secp256k1::SecretKey::from_slice(&spend).unwrap();
         assert_eq!(
-            PublicKey::from_secret_key(&secp, &sk),
+            PublicKey::from_secret_key(&secp, &sk).serialize(),
             output.receiver_public_key
         );
+    }
+
+    /// An output whose Ko or Ke is not a curve point is consensus-valid. It can
+    /// never be ours, and it must not stop the outputs beside it from being found.
+    #[test]
+    fn off_curve_ko_or_ke_is_not_ours_and_does_not_abort_the_batch() {
+        let secp = Secp256k1::new();
+        let keys = keychain_keys(&secp);
+        let book = AddressBook::from_keys(&keys, 20, &secp).unwrap();
+        let addr = keys.address(3, NetworkKind::Main, &secp).unwrap();
+        let (_, _, ours) = crate::tx_builder::create_output(&addr, 70_000, &secp).unwrap();
+
+        let mut off_curve = [0u8; 33];
+        off_curve[0] = 0x02;
+        off_curve[32] = (1u8..=255)
+            .find(|x| {
+                off_curve[32] = *x;
+                PublicKey::from_slice(&off_curve).is_err()
+            })
+            .unwrap();
+        let mut bad_ko = ours.clone();
+        bad_ko.receiver_public_key = off_curve;
+        let mut bad_ke = ours.clone();
+        bad_ke
+            .message
+            .standard_fields
+            .as_mut()
+            .unwrap()
+            .key_exchange_pubkey = off_curve;
+
+        for bad in [&bad_ko, &bad_ke] {
+            assert!(rewind_output(&keys, &book, bad, &secp).unwrap().is_none());
+        }
+        let mut db = MwebCoinDatabase::new();
+        let found = scan_outputs(&keys, &book, &[bad_ko, ours, bad_ke], &mut db, &secp).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(db.balance(), 70_000);
     }
 
     /// Port of ltcd `TestOutputRoundTripMultipleIndices` (`keychain_test.go`).
@@ -650,7 +690,7 @@ mod tests {
             let spend = coin.spend_key.expect("spend key");
             let sk = bitcoin::secp256k1::SecretKey::from_slice(&spend).unwrap();
             let got = PublicKey::from_secret_key(&secp, &sk);
-            assert_eq!(got, output.receiver_public_key);
+            assert_eq!(got.serialize(), output.receiver_public_key);
 
             let go_out: mweb::Output = deserialize(&raw).unwrap();
             let go_coin = rewind_output(&keys, &book, &go_out, &secp)
