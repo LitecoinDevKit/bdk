@@ -80,6 +80,9 @@ Wallet-team onboarding (not reviewer narrative): [`ADOPTION.md`](ADOPTION.md),
 
 | Area | Reference | Stance |
 | --- | --- | --- |
+| Consensus and relay policy | Litecoin Core **0.21.5.8** (`ec1b6489`) | CI pins it; node suites run under strict and permissive relay policy |
+| MWEB soft forks | Core 0.21.5.6 / 0.21.5.7 | Empty pegout list with pegout bit invalid from mainnet height 3,154,440; empty extra data with extra-data bit from 3,172,640 (testnet and regtest: from 0). LDK never authors either |
+| MWEB fee and size policy | Core `policy/feerate.cpp`, `mweb/mweb_policy.cpp` | Fee ≥ weight × 100 litoshi; ≤ 4,000 weight; ≤ 1,000 inputs; standard, non-dust peg-out scripts (`bdk_mweb::policy`) |
 | Stealth / BlindSwitch | Litecoin Core 0.21 | Core paths + H prefix `0x0b` |
 | Bulletproofs / Schnorr | Core / `grin_secp256k1zkp` | Gate: Core peg-in proofs verify under FFI |
 | PSBTv2 MWEB | ltcd `ltcutil/psbt` | Key codes locked 2026-07-27; see alignment doc |
@@ -145,6 +148,7 @@ Merge hygiene: `master` tracks upstream unmodified; `litecoin` should stay re-ap
 - `litecoin` **0.32.8-rc.2** not yet on crates.io for consumers (workspace path patch retained)
 - Mempool watch deferred
 - Multi-peer **omission** defense incomplete
+- Open items from the 2026 Core-alignment audit: [`audit/mweb-core-alignment.md`](audit/mweb-core-alignment.md)
 - No packaged Litecoin regtest Esplora (Electrum-first)
 - First LIP sync downloads full tip leafset (later passes incremental via `SyncState`)
 - Not embedding Nexus/mwebd; not supporting ltcwallet legacy MWEB HD scope
