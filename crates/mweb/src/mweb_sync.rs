@@ -1657,7 +1657,7 @@ mod tests {
     /// A coin marked spent locally (as the FFI asks after a broadcast) whose spend
     /// is never mined keeps its leaf in the chain's leafset. It stays hidden for
     /// [`UNCONFIRMED_SPEND_GRACE_BLOCKS`], then a differential pass restores it.
-    #[cfg(feature = "std")]
+    #[cfg(all(feature = "std", feature = "zkp"))]
     #[test]
     fn differential_sync_restores_coin_whose_spend_never_confirmed() {
         use crate::keys::{MasterKeyScheme, MasterKeys};
@@ -1682,10 +1682,10 @@ mod tests {
         let mut db = MwebCoinDatabase::new();
         db.insert(MwebCoin {
             output_id: [9; 32],
-            commitment: [0; 33],
+            commitment: crate::crypto::switch_commit(&[5; 32], 50_000, &secp).unwrap(),
             amount: 50_000,
             address_index: 0,
-            blind: [0; 32],
+            blind: [5; 32],
             shared_secret: [0; 32],
             spend_key: Some([1; 32]),
             block_height: Some(9),

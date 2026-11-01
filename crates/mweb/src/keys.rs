@@ -212,14 +212,14 @@ impl MasterKeys {
     }
 }
 
-/// Core `Hasher(EHashTag::ADDRESS).Append(index).Append(scan_secret)`.
+/// Core `SecretKey::FromHash(Hasher(EHashTag::ADDRESS).Append(index).Append(scan_secret))`.
 pub fn address_index_tweak(scan_secret: &SecretKey, index: u32) -> [u8; 32] {
     use crate::hash::HashTag;
     let mut hasher = blake3::Hasher::new();
     hasher.update(&[HashTag::Address as u8]);
     hasher.update(&index.to_le_bytes());
     hasher.update(&scan_secret.secret_bytes());
-    *hasher.finalize().as_bytes()
+    crate::hash::secret_from_hash(*hasher.finalize().as_bytes())
 }
 
 /// Convenience: Core scheme from seed on `network`.

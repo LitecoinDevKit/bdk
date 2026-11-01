@@ -39,7 +39,7 @@ pub fn dns_seeds(network: Network) -> &'static [&'static str] {
             "seed-a.litecoin.loshan.co.uk",
             "dnsseed.thrasher.io",
             "dnsseed.litecointools.com",
-            "dnsseed.litecoinpool.org",
+            "dnsseed.ltcpool.org",
             "dnsseed.koin-project.com",
         ],
         Network::Testnet4 => &[

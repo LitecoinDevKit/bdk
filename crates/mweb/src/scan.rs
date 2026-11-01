@@ -145,8 +145,8 @@ pub fn rewind_output(
         return Ok(None);
     }
 
-    let t = hashed_pubkey(HashTag::Derive, &shared_point);
-    let out_key = hashed(HashTag::OutKey, &t);
+    let t = crate::hash::secret_from_hash(hashed_pubkey(HashTag::Derive, &shared_point));
+    let out_key = crate::hash::secret_from_hash(hashed(HashTag::OutKey, &t));
 
     // Ko = B_i · H(OUT_KEY||t)  →  B_i = Ko · H(OUT_KEY||t)⁻¹, then a single
     // address-book lookup. Cost is independent of the book size, so large
@@ -170,7 +170,7 @@ pub fn rewind_output(
         nonce[i] = fields.masked_nonce[i] ^ nmask[i];
     }
 
-    let pre_blind = hashed(HashTag::Blind, &t);
+    let pre_blind = crate::hash::secret_from_hash(hashed(HashTag::Blind, &t));
     let expected_commit = switch_commit(&pre_blind, value, secp)?;
     if expected_commit != output.commitment {
         return Ok(None);
@@ -184,7 +184,7 @@ pub fn rewind_output(
         return Err(Error::bad_proof("rewound output amount exceeds MAX_MONEY"));
     }
 
-    let s = send_key_hash(&a_i, &b_i, value, &nonce);
+    let s = crate::hash::secret_from_hash(send_key_hash(&a_i, &b_i, value, &nonce));
     let s_scalar = Scalar::from_be_bytes(s).map_err(|_| Error::InvalidTweak)?;
     let expected_ke = b_i.mul_tweak(secp, &s_scalar)?;
     if expected_ke != ke {

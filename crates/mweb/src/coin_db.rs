@@ -12,20 +12,37 @@ use crate::changeset::ChangeSet;
 /// Peg-in maturity in blocks (matches Litecoin Core / testenv).
 pub const MWEB_PEGIN_MATURITY: u32 = 6;
 
+/// Core `GetFrozenMWEBOutputIDs()` (mainnet and regtest). Consensus rejects any
+/// spend of these outputs, so they are never balance and never selectable.
+pub const FROZEN_MWEB_OUTPUT_IDS: [[u8; 32]; 1] = [[
+    0x2f, 0x3a, 0x08, 0xd9, 0xf5, 0xef, 0x5f, 0x38, 0x83, 0x86, 0xc1, 0x1e, 0xfe, 0x93, 0x53, 0x94,
+    0xb1, 0x4b, 0x52, 0x42, 0x20, 0xcf, 0xf4, 0xec, 0x5c, 0x81, 0x94, 0x2b, 0x82, 0xe6, 0x94, 0xf7,
+]];
+
+/// Whether consensus forbids spending `output_id`.
+pub fn is_frozen(output_id: &[u8; 32]) -> bool {
+    FROZEN_MWEB_OUTPUT_IDS.contains(output_id)
+}
+
 /// Bucketed unspent MWEB balance at a chain tip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MwebBalance {
-    /// Coins with a known `block_height` and at least one confirmation at the tip.
+    /// Confirmed coins that are spendable at the tip.
     pub confirmed: u64,
     /// Coins with unknown height, or not yet confirmed at the tip.
     pub untrusted_pending: u64,
+    /// Confirmed peg-ins younger than [`MWEB_PEGIN_MATURITY`].
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub immature: u64,
 }
 
 impl MwebBalance {
-    /// Confirmed + untrusted pending.
+    /// Confirmed + untrusted pending + immature.
     pub fn total(&self) -> u64 {
-        self.confirmed.saturating_add(self.untrusted_pending)
+        self.confirmed
+            .saturating_add(self.untrusted_pending)
+            .saturating_add(self.immature)
     }
 }
 
@@ -183,6 +200,8 @@ pub struct MwebCoinDatabase {
     spent: BTreeMap<[u8; 32], MwebCoin>,
     #[cfg(feature = "persist")]
     staged: ChangeSet,
+    #[cfg(feature = "persist")]
+    rejected: Vec<[u8; 32]>,
 }
 
 impl MwebCoinDatabase {
@@ -245,28 +264,39 @@ impl MwebCoinDatabase {
         self.spent.values()
     }
 
-    /// Sum of all unspent amounts (confirmed and pending).
+    /// Sum of all unspent amounts (confirmed and pending), excluding frozen
+    /// outputs.
     ///
     /// Saturates rather than wrapping: coin amounts can originate from a peer
     /// (via scan), so the sum must not be able to panic or wrap on fabricated
     /// values.
     pub fn balance(&self) -> u64 {
-        self.coins
-            .values()
+        self.spendable_coins()
             .fold(0u64, |acc, c| acc.saturating_add(c.amount))
     }
 
-    /// Bucketed unspent balance at `tip_height` (1+ confirmation ⇒ confirmed).
+    /// Bucketed unspent balance at `tip_height`, excluding frozen outputs.
+    ///
+    /// A peg-in with confirmations but fewer than [`MWEB_PEGIN_MATURITY`] is
+    /// `immature`, not `confirmed`, so `confirmed` is what coin selection can use.
     pub fn balance_at(&self, tip_height: u32) -> MwebBalance {
         let mut bal = MwebBalance::default();
-        for coin in self.coins.values() {
-            if coin.is_confirmed(tip_height) {
-                bal.confirmed = bal.confirmed.saturating_add(coin.amount);
+        for coin in self.spendable_coins() {
+            let bucket = if coin.is_spendable(tip_height, MWEB_PEGIN_MATURITY) {
+                &mut bal.confirmed
+            } else if coin.is_confirmed(tip_height) {
+                &mut bal.immature
             } else {
-                bal.untrusted_pending = bal.untrusted_pending.saturating_add(coin.amount);
-            }
+                &mut bal.untrusted_pending
+            };
+            *bucket = bucket.saturating_add(coin.amount);
         }
         bal
+    }
+
+    /// Unspent coins consensus lets us spend (all but frozen outputs).
+    fn spendable_coins(&self) -> impl Iterator<Item = &MwebCoin> {
+        self.coins.values().filter(|c| !is_frozen(&c.output_id))
     }
 
     /// Iterator over unspent coins.
@@ -284,19 +314,17 @@ impl MwebCoinDatabase {
         self.coins.values().cloned().collect()
     }
 
-    /// Unspent coins with at least one confirmation at `tip_height`.
+    /// Unspent, non-frozen coins with at least one confirmation at `tip_height`.
     pub fn unspent_confirmed(&self, tip_height: u32) -> Vec<MwebCoin> {
-        self.coins
-            .values()
+        self.spendable_coins()
             .filter(|c| c.is_confirmed(tip_height))
             .cloned()
             .collect()
     }
 
-    /// Unspent coins that are confirmed and mature at `tip_height`.
+    /// Unspent, non-frozen coins that are confirmed and mature at `tip_height`.
     pub fn unspent_spendable(&self, tip_height: u32, maturity: u32) -> Vec<MwebCoin> {
-        self.coins
-            .values()
+        self.spendable_coins()
             .filter(|c| c.is_spendable(tip_height, maturity))
             .cloned()
             .collect()
@@ -390,12 +418,26 @@ impl MwebCoinDatabase {
     }
 
     /// Apply a changeset without staging (used on load / replay).
+    ///
+    /// An unspent coin whose stored commitment does not open to its stored
+    /// amount and blind is not loaded (it could never be spent, and its amount
+    /// is untrustworthy); see [`Self::rejected_on_load`]. The check needs the
+    /// `zkp` and `std` features and is skipped without them.
     pub fn apply_changeset(&mut self, cs: ChangeSet) {
+        #[cfg(all(feature = "zkp", feature = "std"))]
+        let secp = bitcoin::secp256k1::Secp256k1::new();
         for id in &cs.restored {
             self.spent.remove(id);
         }
         for (id, coin) in cs.coins {
             if self.spent.contains_key(&id) {
+                continue;
+            }
+            #[cfg(all(feature = "zkp", feature = "std"))]
+            if crate::crypto::switch_commit(&coin.blind, coin.amount, &secp)
+                .map_or(true, |c| c != coin.commitment)
+            {
+                self.rejected.push(id);
                 continue;
             }
             self.spent.remove(&id);
@@ -415,6 +457,12 @@ impl MwebCoinDatabase {
     /// Mutable access to the staged changeset.
     pub fn staged_mut(&mut self) -> &mut ChangeSet {
         &mut self.staged
+    }
+
+    /// Output ids of persisted coins [`Self::apply_changeset`] refused to load
+    /// because their commitment does not open to the stored amount and blind.
+    pub fn rejected_on_load(&self) -> &[[u8; 32]] {
+        &self.rejected
     }
 
     /// Take the staged changeset, leaving it empty.

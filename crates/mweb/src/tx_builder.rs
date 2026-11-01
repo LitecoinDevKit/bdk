@@ -259,9 +259,36 @@ pub fn build_pegin(
     })
 }
 
-/// Core `Kernel::GetHash` / `GetKernelID`: untagged BLAKE3 of consensus-serialized kernel.
+/// Core `Kernel::GetHash` / `GetKernelID`: untagged BLAKE3 of the kernel as Core
+/// re-serializes it.
+///
+/// Core's `Kernel::Serialize` writes pegouts and extra data only when they are
+/// non-empty, though its parser reads them whenever the feature bit is set. For
+/// a kernel with either bit set over an empty field, that differs from the wire
+/// bytes, and the ID must follow Core.
 pub fn kernel_id(kernel: &Kernel) -> [u8; 32] {
-    blake3_hash(&serialize(kernel))
+    let mut out = vec![kernel.features];
+    if let Some(fee) = kernel.fee {
+        out.extend(write_mweb_varint(fee));
+    }
+    if let Some(pegin) = kernel.pegin {
+        out.extend(write_mweb_varint(pegin));
+    }
+    if !kernel.pegouts.is_empty() {
+        out.extend(serialize(&kernel.pegouts));
+    }
+    if let Some(lock_height) = kernel.lock_height {
+        out.extend(write_mweb_varint(i64::from(lock_height)));
+    }
+    if let Some(stealth_excess) = kernel.stealth_excess {
+        out.extend(stealth_excess.serialize());
+    }
+    if !kernel.extra_data.is_empty() {
+        out.extend(serialize(&kernel.extra_data));
+    }
+    out.extend(kernel.excess);
+    out.extend(kernel.signature);
+    blake3_hash(&out)
 }
 
 struct AssembledBody {
@@ -458,16 +485,16 @@ pub fn create_output_with_sender(
     let mut n = [0u8; 16];
     n.copy_from_slice(&n_full[..16]);
 
-    let s = send_key_hash(&a, &b, value, &n);
+    let s = crate::hash::secret_from_hash(send_key_hash(&a, &b, value, &n));
     let s_scalar = Scalar::from_be_bytes(s).map_err(|_| Error::InvalidTweak)?;
     let s_a = a.mul_tweak(secp, &s_scalar)?;
-    let t = hashed_pubkey(HashTag::Derive, &s_a);
-    let out_key = hashed(HashTag::OutKey, &t);
+    let t = crate::hash::secret_from_hash(hashed_pubkey(HashTag::Derive, &s_a));
+    let out_key = crate::hash::secret_from_hash(hashed(HashTag::OutKey, &t));
     let out_key_scalar = Scalar::from_be_bytes(out_key).map_err(|_| Error::InvalidTweak)?;
     let ko = b.mul_tweak(secp, &out_key_scalar)?;
     let ke = b.mul_tweak(secp, &s_scalar)?;
 
-    let raw_blind = hashed(HashTag::Blind, &t);
+    let raw_blind = crate::hash::secret_from_hash(hashed(HashTag::Blind, &t));
     let switched = blind_switch(&raw_blind, value, secp)?;
     let commitment = pedersen_commit(value, &switched, secp)?;
 
@@ -536,7 +563,7 @@ pub fn create_input(
     let mut key_hasher = blake3::Hasher::new();
     key_hasher.update(&input_pk.serialize());
     key_hasher.update(&output_pk.serialize());
-    let key_hash = *key_hasher.finalize().as_bytes();
+    let key_hash = crate::hash::secret_from_hash(*key_hasher.finalize().as_bytes());
 
     let ko_term = Zeroizing::new(secret_mul(output_key, &key_hash)?);
     let sig_key = Zeroizing::new(secret_add(input_key, &ko_term)?);
@@ -615,7 +642,7 @@ pub fn create_kernel(
         let mut h = blake3::Hasher::new();
         h.update(&excess_pk.serialize());
         h.update(&stealth_pk.serialize());
-        let h_hash = *h.finalize().as_bytes();
+        let h_hash = crate::hash::secret_from_hash(*h.finalize().as_bytes());
         let mul = Zeroizing::new(secret_mul(&blind, &h_hash)?);
         sig_key = Zeroizing::new(secret_add(&mul, &sb)?);
         Some(stealth_pk)
@@ -667,8 +694,8 @@ pub fn shared_secret_and_spend_for_owned(
     let scan_scalar =
         Scalar::from_be_bytes(keys.scan.secret_bytes()).map_err(|_| Error::InvalidTweak)?;
     let shared_point = ke.mul_tweak(secp, &scan_scalar)?;
-    let t = hashed_pubkey(HashTag::Derive, &shared_point);
-    let out_key = hashed(HashTag::OutKey, &t);
+    let t = crate::hash::secret_from_hash(hashed_pubkey(HashTag::Derive, &shared_point));
+    let out_key = crate::hash::secret_from_hash(hashed(HashTag::OutKey, &t));
     let out_key_scalar = Scalar::from_be_bytes(out_key).map_err(|_| Error::InvalidTweak)?;
     let b_i = keys.spend_key_at(index)?;
     let expected_ko = PublicKey::from_secret_key(secp, &b_i).mul_tweak(secp, &out_key_scalar)?;

@@ -1,6 +1,6 @@
 //! Coin-database parity with Litecoin Core 0.21.5.8's wallet.
 //!
-//! All tests here are red today; each names the audit finding it pins.
+//! Each test names the audit finding it pins.
 
 #![cfg(feature = "persist")]
 
@@ -31,7 +31,6 @@ fn coin(output_id: [u8; 32], amount: u64, height: u32, is_pegin: bool) -> MwebCo
 /// P-4: Core rejects any spend of a frozen output in consensus and its wallet
 /// drops them from balance and coin selection (`wallet.cpp` `IsFrozenMWEBOutput`).
 #[test]
-#[ignore = "P-4 red test: frozen MWEB output IDs are not excluded"]
 fn frozen_output_is_neither_balance_nor_spendable() {
     let frozen: [u8; 32] = <[u8; 32]>::from_hex(FROZEN_OUTPUT_ID).unwrap();
     let mut db = MwebCoinDatabase::new();
@@ -46,7 +45,6 @@ fn frozen_output_is_neither_balance_nor_spendable() {
 /// `CombinedBalance::trusted_spendable` adds that bucket, while coin selection
 /// (`unspent_spendable`) correctly withholds it for `MWEB_PEGIN_MATURITY` blocks.
 #[test]
-#[ignore = "P-11 red test: balance buckets ignore peg-in maturity"]
 fn immature_pegin_is_not_in_confirmed_bucket() {
     let mut db = MwebCoinDatabase::new();
     db.insert(coin([1; 32], 1_000_000, 100, true));
@@ -59,7 +57,6 @@ fn immature_pegin_is_not_in_confirmed_bucket() {
 /// `switch_commit(blind, amount)`, or the stored amount (or blind) is wrong and
 /// the coin can never be spent.
 #[test]
-#[ignore = "P-12 red test: coins are not revalidated on load"]
 fn load_rejects_coin_whose_commitment_does_not_open() {
     let secp = Secp256k1::new();
     let mut good = coin([1; 32], 1_000_000, 100, false);

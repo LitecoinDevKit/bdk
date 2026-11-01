@@ -5,6 +5,7 @@
 use bdk_core::Merge;
 use bdk_file_store::Store;
 use bdk_mweb::{MwebCoin, MwebCoinDatabase};
+use bitcoin::secp256k1::Secp256k1;
 
 const MAGIC: &[u8] = b"bdk_mweb_v2";
 
@@ -13,7 +14,9 @@ fn sample_coin(id: u8, amount: u64) -> MwebCoin {
     output_id[0] = id;
     MwebCoin {
         output_id,
-        commitment: [0x02; 33],
+        // Loading drops coins whose commitment does not open (when built with `zkp`).
+        commitment: bdk_mweb::crypto::switch_commit(&[0x0b; 32], amount, &Secp256k1::new())
+            .unwrap_or([0x02; 33]),
         amount,
         address_index: 2,
         blind: [0x0b; 32],

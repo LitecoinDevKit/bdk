@@ -34,6 +34,31 @@ pub fn hashed(tag: HashTag, payload: &[u8]) -> [u8; 32] {
     *hasher.finalize().as_bytes()
 }
 
+/// Core `SecretKey::FromHash`: `hash` itself when it is a valid secret key
+/// (non-zero and below the group order), otherwise the first
+/// BLAKE3("MWEB hash-to-scalar" || hash || counter as LE32) that is.
+///
+/// Every MWEB hash Core turns into a scalar goes through this, so LDK must too
+/// wherever Core does, or the two derive different keys for the ~2^-128 of
+/// hashes that are not valid scalars.
+pub fn secret_from_hash(hash: [u8; 32]) -> [u8; 32] {
+    if SecretKey::from_slice(&hash).is_ok() {
+        return hash;
+    }
+    let mut counter: u32 = 0;
+    loop {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"MWEB hash-to-scalar");
+        hasher.update(&hash);
+        hasher.update(&counter.to_le_bytes());
+        let key = *hasher.finalize().as_bytes();
+        if SecretKey::from_slice(&key).is_ok() {
+            return key;
+        }
+        counter = counter.wrapping_add(1);
+    }
+}
+
 /// Untagged BLAKE3 of `payload` (Core `Hasher()` / `Hashed(serializable)` body).
 pub fn blake3_hash(payload: &[u8]) -> [u8; 32] {
     *blake3::hash(payload).as_bytes()
@@ -72,4 +97,37 @@ pub fn nonce_mask(shared_t: &[u8; 32]) -> [u8; 16] {
     let mut out = [0u8; 16];
     out.copy_from_slice(&h[..16]);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Core `Test_Keys.cpp` `SecretKeyValidation`, plus the fallback derivation.
+    #[test]
+    fn secret_from_hash_matches_core() {
+        let zero = [0u8; 32];
+        let mut one = [0u8; 32];
+        one[31] = 1;
+        let order: [u8; 32] = [
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xfe, 0xba, 0xae, 0xdc, 0xe6, 0xaf, 0x48, 0xa0, 0x3b, 0xbf, 0xd2, 0x5e, 0x8c,
+            0xd0, 0x36, 0x41, 0x41,
+        ];
+        let mut order_minus_one = order;
+        order_minus_one[31] -= 1;
+
+        for valid in [one, order_minus_one] {
+            assert_eq!(secret_from_hash(valid), valid);
+        }
+        for invalid in [zero, order] {
+            let key = secret_from_hash(invalid);
+            assert!(SecretKey::from_slice(&key).is_ok());
+            let mut first = blake3::Hasher::new();
+            first.update(b"MWEB hash-to-scalar");
+            first.update(&invalid);
+            first.update(&0u32.to_le_bytes());
+            assert_eq!(key, *first.finalize().as_bytes());
+        }
+    }
 }

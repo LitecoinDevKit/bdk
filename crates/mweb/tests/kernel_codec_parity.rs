@@ -121,7 +121,6 @@ fn canonical_kernels_encode_like_core_for_every_feature_combination() {
 /// for the two soft-forked encodings the kernel ID LDK computes is not Core's.
 /// Both were consensus-valid on mainnet before heights 3,154,440 and 3,172,640.
 #[test]
-#[ignore = "P-9 red test: kernel_id hashes the wire bytes, Core hashes its re-serialization"]
 fn noncanonical_kernel_id_matches_core() {
     for features in [FEE | PEGOUT | STEALTH, FEE | STEALTH | EXTRA] {
         let mut k = canonical_kernel(features);
