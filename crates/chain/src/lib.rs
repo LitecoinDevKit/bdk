@@ -34,7 +34,9 @@ pub use bitcoin;
 /// upstream BDK without touching its source.
 pub use bitcoin as litecoin;
 mod litecoin_scripts;
-pub use litecoin_scripts::{is_mweb_bridge_output, mweb_pegin_script_pubkey};
+pub use litecoin_scripts::{
+    is_hogex, is_hogex_pegout, is_mweb_bridge_output, mweb_pegin_script_pubkey, PEGOUT_MATURITY,
+};
 mod balance;
 pub use balance::*;
 mod chain_data;

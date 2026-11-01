@@ -112,6 +112,9 @@ pub struct CanonicalTxOut<P> {
     pub spent_by: Option<(P, Txid)>,
     /// Whether this output is on a coinbase transaction.
     pub is_on_coinbase: bool,
+    /// Whether this output is a Litecoin HogEx peg-out (see
+    /// [`crate::is_hogex_pegout`]).
+    pub is_hogex_pegout: bool,
 }
 
 impl<P: Ord> Ord for CanonicalTxOut<P> {
@@ -136,8 +139,10 @@ impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
     /// A coinbase output is mature once a transaction spending it can be included in the block
     /// after `tip`. Consensus requires the spending block to be at least [`COINBASE_MATURITY`]
     /// blocks above the confirming block, so the output is mature once `tip` is at least
-    /// `COINBASE_MATURITY - 1` blocks above the confirming block. Non-coinbase outputs are always
-    /// mature.
+    /// `COINBASE_MATURITY - 1` blocks above the confirming block. A Litecoin HogEx peg-out is
+    /// treated the same way with [`PEGOUT_MATURITY`]. Other outputs are always mature.
+    ///
+    /// [`PEGOUT_MATURITY`]: crate::PEGOUT_MATURITY
     ///
     /// If the position is confirmed [`transitively`](ChainPosition::Confirmed::transitively), the
     /// confirmation height may be an upper bound (see [`confirmation_height_upper_bound`]), so
@@ -145,21 +150,21 @@ impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
     ///
     /// [`confirmation_height_upper_bound`]: ChainPosition::confirmation_height_upper_bound
     pub fn is_mature(&self, tip: u32) -> bool {
-        if self.is_on_coinbase {
-            let conf_height = match self.pos.confirmation_height_upper_bound() {
-                Some(height) => height,
-                // A coinbase can be canonical without us holding an anchor for it (i.e. it is an
-                // ancestor of a canonical tx, or is assumed canonical). With no known
-                // confirmation height, maturity cannot be proven.
-                None => return false,
-            };
-            let age = tip.saturating_sub(conf_height);
-            if age + 1 < COINBASE_MATURITY {
-                return false;
-            }
-        }
-
-        true
+        let maturity = if self.is_on_coinbase {
+            COINBASE_MATURITY
+        } else if self.is_hogex_pegout {
+            crate::litecoin_scripts::PEGOUT_MATURITY
+        } else {
+            return true;
+        };
+        let conf_height = match self.pos.confirmation_height_upper_bound() {
+            Some(height) => height,
+            // A coinbase or HogEx can be canonical without us holding an anchor for it (i.e. it
+            // is an ancestor of a canonical tx, or is assumed canonical). With no known
+            // confirmation height, maturity cannot be proven.
+            None => return false,
+        };
+        tip.saturating_sub(conf_height) + 1 >= maturity
     }
 
     /// Whether the utxo is/was/will be spendable with chain `tip`.
@@ -298,6 +303,7 @@ impl<A, P: Clone> Canonical<A, P> {
             txout: txout.clone(),
             spent_by,
             is_on_coinbase: tx.is_coinbase(),
+            is_hogex_pegout: crate::litecoin_scripts::is_hogex_pegout(tx, op.vout),
         })
     }
 

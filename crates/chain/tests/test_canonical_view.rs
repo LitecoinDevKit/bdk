@@ -966,7 +966,6 @@ fn test_mature_coinbase_is_settled_not_immature() {
 /// v8 HogAddr at index 0) cannot be spent until it has 6 confirmations. The
 /// HogAddr script is the marker because Esplora does not report `is_hog_ex`.
 #[test]
-#[ignore = "P-3 red test: is_mature only knows coinbase, not HogEx peg-outs"]
 fn test_hogex_pegout_is_immature_for_six_blocks() {
     use bitcoin::{WitnessProgram, WitnessVersion};
 

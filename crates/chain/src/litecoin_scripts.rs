@@ -23,6 +23,25 @@ pub fn is_mweb_bridge_output(script: &Script) -> bool {
     )
 }
 
+/// Litecoin Core `PEGOUT_MATURITY`: a HogEx peg-out output cannot be spent until the spending
+/// block is this many blocks above the HogEx (consensus, `Consensus::CheckTxInputs`).
+pub const PEGOUT_MATURITY: u32 = 6;
+
+/// Whether `tx` is a HogEx: its first output pays the v8 HogAddr.
+///
+/// Checked by script rather than by [`bitcoin::Transaction::is_hog_ex`] because Esplora
+/// rebuilds transactions without that flag.
+pub fn is_hogex(tx: &bitcoin::Transaction) -> bool {
+    tx.output
+        .first()
+        .is_some_and(|out| out.script_pubkey.witness_version() == Some(WitnessVersion::V8))
+}
+
+/// Whether output `vout` of `tx` is a HogEx peg-out (every HogEx output after the HogAddr).
+pub fn is_hogex_pegout(tx: &bitcoin::Transaction, vout: u32) -> bool {
+    vout > 0 && is_hogex(tx)
+}
+
 /// Builds the transparent peg-in `scriptPubKey`: witness version 9 committing to `kernel_id`.
 ///
 /// The matching transaction must also carry an `mw_tx` whose peg-in kernel id equals `kernel_id`.
