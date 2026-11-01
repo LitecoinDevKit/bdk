@@ -258,12 +258,14 @@ impl RpcClient {
             .collect()
     }
 
+    /// Transparent wallet UTXOs. MWEB outputs (listed without a `vout`) are skipped.
     pub fn list_unspent(&self) -> Result<Vec<Unspent>> {
         let v = self.call("listunspent", json!([]))?;
         let arr = v
             .as_array()
             .ok_or_else(|| anyhow!("listunspent returned non-array"))?;
         arr.iter()
+            .filter(|u| !u["vout"].is_null())
             .map(|u| {
                 let txid = u["txid"]
                     .as_str()

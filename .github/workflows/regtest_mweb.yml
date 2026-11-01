@@ -110,6 +110,7 @@ jobs:
                                     --test core_pegin_pegout_roundtrip \
                                     --test core_policy_guardrails \
                                     --test core_offcurve_output \
+                                    --test core_reorg_pegin_pegout \
                                     --test lip0006_sync \
                                     --test lip0006_p2p \
                                     --test lip0006_throttle \

@@ -182,7 +182,7 @@ Coin database
 - [x] Frozen-output exclusion (P-4).
 - [x] Pending-spend rollback (P-6).
 - [x] Reload revalidation (P-12).
-- [ ] Reorg (`invalidateblock`) across a peg-in and a peg-out asserting value conservation (regtest scenario not yet written).
+- [x] Reorg (`invalidateblock`) across a peg-in and a peg-out asserting value conservation: `core_reorg_pegin_pegout.rs` disconnects the peg-out, then the peg-in, then re-mines both; after each pass the incrementally synced unspent set equals a fresh sync, and MWEB unspent plus the confirmed peg-out and fee equals the delivered peg-in (regtest, Core 0.21.5.8, both relay policies).
 
 Sync integrity
 - [x] Decoders accept everything consensus accepts (P-1, R-1). As defense in depth, block data that fails to decode (an `mwebutxos` output, or the HogEx or MWEB header in `mwebheader`) is `BanReason::Undecodable`: the pool rotates without banning, and if every peer fails that way the error names the local decoder. Envelope and framing failures still ban. Tests: `p2p::tests::utxos_from_payload_classifies_output_failures_as_undecodable`, `p2p::tests::header_from_payload_classifies_by_section`, `mweb_sync::tests::undecodable_block_data_rotates_without_ban`, `mweb_sync::tests::undecodable_from_every_peer_points_at_local_decoder`, `mweb_sync::tests::framing_failure_still_bans`.
