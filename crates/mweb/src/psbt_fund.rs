@@ -17,6 +17,7 @@ use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::All;
 use bitcoin::transaction::Version;
 use bitcoin::{Address, NetworkKind, ScriptBuf, Transaction};
+use zeroize::Zeroizing;
 
 use crate::coin_db::MwebCoin;
 use crate::crypto::{blind_sum, blind_switch, random_secret};
@@ -33,7 +34,7 @@ use crate::tx_builder::{
 };
 
 /// Staged output produced during fund (blinds kept off-PSBT until sign).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct StagedMwebOutput {
     /// Wire output (rangeproof + output sig already present).
     pub output: mweb::Output,
@@ -47,8 +48,22 @@ pub struct StagedMwebOutput {
     pub change_index: Option<u32>,
 }
 
+/// `raw_blind` opens the output's commitment and `sender_key` balances the
+/// stealth sum, so neither belongs in a log line.
+impl core::fmt::Debug for StagedMwebOutput {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("StagedMwebOutput")
+            .field("output", &self.output)
+            .field("raw_blind", &"<redacted>")
+            .field("sender_key", &"<redacted>")
+            .field("amount", &self.amount)
+            .field("change_index", &self.change_index)
+            .finish()
+    }
+}
+
 /// Funded but unsigned MWEB spend (no `mw_tx` yet).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FundedMwebPsbt {
     /// Native PSBT with MWEB maps; `mw_tx` is assembled only at extract.
     pub psbt: Psbt,
@@ -60,6 +75,22 @@ pub struct FundedMwebPsbt {
     pub fee: u64,
     /// Peg-out destinations.
     pub pegouts: Vec<(ScriptBuf, u64)>,
+}
+
+/// Until signing scrubs them, the PSBT's input maps carry each coin's shared
+/// secret (which yields its blind); print it as it will be once scrubbed.
+impl core::fmt::Debug for FundedMwebPsbt {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut psbt = self.psbt.clone();
+        scrub_sensitive_fields(&mut psbt);
+        f.debug_struct("FundedMwebPsbt")
+            .field("psbt", &psbt)
+            .field("spent_coins", &self.spent_coins)
+            .field("staged_outputs", &self.staged_outputs)
+            .field("fee", &self.fee)
+            .field("pegouts", &self.pegouts)
+            .finish()
+    }
 }
 
 impl FundedMwebPsbt {
@@ -206,9 +237,10 @@ pub fn sign_funded_mweb(
     _keys: &MasterKeys,
     secp: &Secp256k1<All>,
 ) -> Result<(), Error> {
+    // Blinds and keys below are spend-equivalent while live; see `assemble_body`.
     let mut outputs = Vec::with_capacity(funded.staged_outputs.len());
-    let mut out_blinds = Vec::with_capacity(funded.staged_outputs.len());
-    let mut out_keys = Vec::with_capacity(funded.staged_outputs.len());
+    let mut out_blinds = Zeroizing::new(Vec::with_capacity(funded.staged_outputs.len()));
+    let mut out_keys = Zeroizing::new(Vec::with_capacity(funded.staged_outputs.len()));
 
     for staged in &funded.staged_outputs {
         let switched = blind_switch(&staged.raw_blind, staged.amount, secp)?;
@@ -218,14 +250,14 @@ pub fn sign_funded_mweb(
     }
 
     let mut inputs = Vec::with_capacity(funded.spent_coins.len());
-    let mut in_blinds = Vec::with_capacity(funded.spent_coins.len());
-    let mut in_keys_pos = Vec::with_capacity(funded.spent_coins.len());
-    let mut in_keys_neg = Vec::with_capacity(funded.spent_coins.len());
+    let mut in_blinds = Zeroizing::new(Vec::with_capacity(funded.spent_coins.len()));
+    let mut in_keys_pos = Zeroizing::new(Vec::with_capacity(funded.spent_coins.len()));
+    let mut in_keys_neg = Zeroizing::new(Vec::with_capacity(funded.spent_coins.len()));
 
     for coin in &funded.spent_coins {
-        let spend_key = coin.spend_key.ok_or(Error::MissingCoinSecrets)?;
+        let spend_key = Zeroizing::new(coin.spend_key.ok_or(Error::MissingCoinSecrets)?);
         let switched = blind_switch(&coin.blind, coin.amount, secp)?;
-        let ephemeral = random_secret(secp);
+        let ephemeral = Zeroizing::new(random_secret(secp));
         let input = create_input(
             &coin.output_id,
             &coin.commitment,
@@ -234,8 +266,8 @@ pub fn sign_funded_mweb(
             secp,
         )?;
         in_blinds.push(switched);
-        in_keys_pos.push(ephemeral);
-        in_keys_neg.push(spend_key);
+        in_keys_pos.push(*ephemeral);
+        in_keys_neg.push(*spend_key);
         inputs.push(input);
     }
 
@@ -243,14 +275,14 @@ pub fn sign_funded_mweb(
     let pos = out_blinds;
     let mut neg = in_blinds;
     neg.push(kernel_offset);
-    let kernel_blind = if pos.is_empty() {
-        let sum_neg = blind_sum(&neg, &[])?;
-        blind_sum(&[], &[sum_neg])?
+    let kernel_blind = Zeroizing::new(if pos.is_empty() {
+        let sum_neg = Zeroizing::new(blind_sum(&neg, &[])?);
+        blind_sum(&[], &[*sum_neg])?
     } else {
         blind_sum(&pos, &neg)?
-    };
+    });
 
-    let stealth_blind = random_secret(secp);
+    let stealth_blind = Zeroizing::new(random_secret(secp));
     let pegout_coins: Vec<PegOutCoin> = funded
         .pegouts
         .iter()
@@ -263,8 +295,8 @@ pub fn sign_funded_mweb(
         .collect::<Result<_, Error>>()?;
 
     let kernel = create_kernel(
-        kernel_blind,
-        Some(stealth_blind),
+        *kernel_blind,
+        Some(*stealth_blind),
         Some(money_to_i64(funded.fee, "kernel fee")?),
         None,
         &pegout_coins,
@@ -272,9 +304,9 @@ pub fn sign_funded_mweb(
     )?;
 
     let mut stealth_pos = out_keys;
-    stealth_pos.extend(in_keys_pos);
+    stealth_pos.extend_from_slice(&in_keys_pos);
     let mut stealth_neg = in_keys_neg;
-    stealth_neg.push(stealth_blind);
+    stealth_neg.push(*stealth_blind);
     let stealth_offset = if stealth_pos.is_empty() {
         blind_sum(&[], &stealth_neg)?
     } else {

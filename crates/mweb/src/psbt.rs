@@ -15,9 +15,8 @@ use bitcoin::secp256k1::All;
 use bitcoin::Transaction;
 
 use crate::coin_db::MwebCoin;
-use crate::crypto::random_secret;
 use crate::error::Error;
-use crate::tx_builder::{create_input, FinishedMwebPegin, FinishedMwebTx};
+use crate::tx_builder::{FinishedMwebPegin, FinishedMwebTx};
 
 pub use bitcoin::psbt::mweb::{
     MwebInput as MwebPsbtInput, MwebKernel as MwebPsbtKernel, MwebOutput as MwebPsbtOutput,
@@ -249,16 +248,21 @@ pub fn populate_pegin_psbt(psbt: &mut Psbt, pegin: &FinishedMwebPegin) {
     populate_psbt_from_mw(psbt, &pegin.mw_tx, &[]);
 }
 
-/// ltcwallet-shaped finalize helper: enrich / (re)sign MWEB input maps that lack signatures.
+/// ltcwallet-shaped finalize helper for PSBTs whose MWEB body is already signed
+/// (peg-in extract and legacy [`FinishedMwebTx`] paths): fills the parallel MWEB
+/// maps, checks every input is signed and both offsets are present, and scrubs
+/// per-input secrets ([`scrub_sensitive_fields`]) so the PSBT can be handed back.
 ///
-/// Prefer [`crate::psbt_fund::sign_funded_mweb`] for the happy-path fund→sign lifecycle. This
-/// helper covers peg-in extract and legacy [`FinishedMwebTx`] paths where maps already carry a
-/// signed body and only need sync / extract readiness.
+/// It does not sign. An MWEB input signature commits to an ephemeral key that
+/// must also enter the stealth offset, which only the author of the whole
+/// transaction can compute; use [`crate::psbt_fund::sign_funded_mweb`].
+/// `coins` and `secp` are kept for API compatibility.
 pub fn sign_mweb_components(
     psbt: &mut Psbt,
     coins: &[MwebCoin],
     secp: &Secp256k1<All>,
 ) -> Result<(), Error> {
+    let _ = (coins, secp);
     // Prefer parallel mweb_inputs (pure MWEB); fall back to per-slot Input::mweb.
     if psbt.mweb_inputs.is_empty() && psbt.inputs.iter().any(|i| i.mweb.output_id.is_some()) {
         psbt.mweb_inputs = psbt.inputs.iter().map(|i| i.mweb.clone()).collect();
@@ -267,34 +271,21 @@ pub fn sign_mweb_components(
         psbt.mweb_outputs = psbt.outputs.iter().map(|o| o.mweb.clone()).collect();
     }
 
-    for mapped in &mut psbt.mweb_inputs {
-        let id = match mapped.output_id {
-            Some(id) => id,
-            None => continue,
-        };
-        if let Some(coin) = coins.iter().find(|c| c.output_id == id) {
-            enrich_input_from_coin(mapped, coin);
-        }
-        if mapped.signature.is_some() {
-            continue;
-        }
-        let coin = coins
-            .iter()
-            .find(|c| c.output_id == id)
-            .ok_or_else(|| Error::Crypto("unsigned MWEB input missing coin secrets".into()))?;
-        let spend_key = coin.spend_key.ok_or(Error::MissingCoinSecrets)?;
-        let ephemeral = random_secret(secp);
-        let input = create_input(&id, &coin.commitment, &ephemeral, &spend_key, secp)?;
-        *mapped = mweb_input_from_wire(&input);
-        enrich_input_from_coin(mapped, coin);
+    if psbt
+        .mweb_inputs
+        .iter()
+        .any(|i| i.output_id.is_some() && i.signature.is_none())
+    {
+        return Err(Error::Crypto(
+            "unsigned MWEB input: sign the whole transaction with sign_funded_mweb".into(),
+        ));
     }
-
-    // Ensure offsets exist when kernels already carry signatures (legacy authored body path).
     if psbt.mweb_tx_offset.is_none() || psbt.mweb_stealth_offset.is_none() {
         return Err(Error::Crypto(
             "MWEB PSBT missing tx/stealth offset; use fund→sign or populate from mw_tx".into(),
         ));
     }
+    scrub_sensitive_fields(psbt);
     Ok(())
 }
 
@@ -473,7 +464,13 @@ mod tests {
         assert!(psbt.mweb_outputs[0].range_proof.is_some());
         assert!(psbt.mweb_kernels[0].signature.is_some());
 
+        let mut unsigned = psbt.clone();
+        unsigned.mweb_inputs[0].signature = None;
+        assert!(sign_mweb_components(&mut unsigned, &finished.spent_coins, &secp).is_err());
+
         sign_mweb_components(&mut psbt, &finished.spent_coins, &secp).unwrap();
+        assert_eq!(psbt.mweb_inputs[0].shared_secret, None);
+        assert_eq!(psbt.mweb_inputs[0].amount, None);
         let tx = extract_tx_with_mweb(&psbt).unwrap();
         assert!(tx.mw_tx.is_some());
         assert_eq!(
