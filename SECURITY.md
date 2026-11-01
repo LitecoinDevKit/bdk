@@ -1,20 +1,12 @@
 # Security Policy
 
-To report security issues, either
+This repository is the Litecoin Dev Kit (LDK) fork of BDK. Report suspected
+security issues in it, including anything in its Litecoin and MWEB support,
+privately through GitHub:
+<https://github.com/LitecoinDevKit/bdk/security/advisories/new>.
 
-- send an email to `security AT bitcoindevkit DOT org` (not for support), or
-- open a security advisory on GitHub at
-[`https://github.com/bitcoindevkit/bdk/security/advisories`](https://github.com/bitcoindevkit/bdk/security/advisories).
+Please do not open a public issue for a security problem.
 
-The following key may be used to communicate sensitive information to BDK via email:
-
-| Name | Fingerprint |
-| ---- | ----------- |
-| `security@bitcoindevkit.org` | `7416 BB25 5E60 E40D 482E 591B 7201 8930 A1FB 3444` |
-
-You can import the key by running the following command:
-```
-gpg --keyserver hkps://keys.openpgp.org --recv-keys 7416BB255E60E40D482E591B72018930A1FB3444
-```
-
-You can also download it from [our website](https://bitcoindevkit.org/foundation/pgp/#security-disclosures).
+If the issue is in code this fork inherits unchanged from BDK, please also
+report it upstream as described in
+[BDK's security policy](https://github.com/bitcoindevkit/bdk/blob/master/SECURITY.md).

@@ -982,30 +982,30 @@ The 2026-10 audit compared the MWEB funds path (bdk_mweb, the pinned
 rust-litecoin codecs and PSBT extract, and the bdk_wallet facade) with Litecoin
 Core 0.21.5.5 through 0.21.5.8, which shipped several MWEB fixes and two soft
 forks. Evidence, tests and the Core-commit map are in
-[`audit/mweb-core-alignment.md`](audit/mweb-core-alignment.md). Four findings
-are under embargo until a coordinated release and are listed by ID only.
+[`audit/mweb-core-alignment.md`](audit/mweb-core-alignment.md). rust-litecoin
+fixes are in LitecoinDevKit `90fc904`.
 
 | F | Audit | Severity | Summary | Status |
 | --- | --- | --- | --- | --- |
-| F-22 | P-1 | High | Embargoed | Fixed, unreleased |
-| F-23 | R-1 | High | Embargoed | Fixed, unreleased |
-| F-24 | R-2 | Medium | Embargoed | Fixed, unreleased |
-| F-25 | R-3 | Medium | Embargoed | Fixed, unreleased |
+| F-22 | P-1 | High | Decoder rejected consensus-valid outputs with off-curve Ko/Ke; one mined output would stall every LDK sync | Fixed |
+| F-23 | R-1 | High | MWEB block skipped when header version bit 29 is clear; a valid block could stall `bdk_bitcoind_rpc` | Fixed |
+| F-24 | R-2 | Medium | MWEB PSBT global key index sized an unbounded allocation | Fixed |
+| F-25 | R-3 | Medium | ltcd PSBTv2 import reserved memory from untrusted counts | Fixed |
 | F-26 | P-2 | Medium | Authoring ignored Core relay policy: no MWEB fee floor, size caps, or peg-out script checks (an OP_RETURN peg-out relays and burns) | Fixed (`bdk_mweb::policy`) |
 | F-27 | P-6 | Medium | Coins marked spent at broadcast stayed hidden if the spend never confirmed | Fixed (restored after 12 blocks) |
 | F-28 | P-3 | Low | HogEx peg-outs not treated as immature for Core's `PEGOUT_MATURITY` | Fixed (`bdk_chain`) |
 | F-29 | P-4 | Low | Core's frozen MWEB output counted as balance and selectable | Fixed |
-| F-30 | P-5 | Low | PSBT extract could emit encodings that decode differently or are soft-fork invalid | Fixed in rust-litecoin, unreleased |
+| F-30 | P-5 | Low | PSBT extract could emit encodings that decode differently or are soft-fork invalid | Fixed |
 | F-31 | P-7, R-7, R-8 | Low | `sign_mweb_components` left input secrets in the PSBT and signed unbalanceably; `Debug` printed blinds | Fixed |
 | F-32 | P-8 | Low | Core's `SecretKey::FromHash` fallback not ported | Fixed |
 | F-33 | P-9 | Low | `kernel_id` diverged from Core for soft-forked kernel encodings (none on mainnet) | Fixed |
 | F-34 | P-11 | Low | Immature peg-ins counted as confirmed balance | Fixed (`MwebBalance::immature`) |
 | F-35 | P-12 | Low | Persisted coins trusted on load | Fixed (commitment re-checked; `rejected_on_load`) |
 | F-36 | P-13 | Low | Stale DNS seed | Fixed |
-| F-37 | R-4 | Medium | `compute_wtxid` included MWEB data; witness commitments of MWEB blocks failed to verify | Fixed in rust-litecoin, unreleased |
+| F-37 | R-4 | Medium | `compute_wtxid` included MWEB data; witness commitments of MWEB blocks failed to verify | Fixed |
 | F-38 | R-5 | Low | MWEB-only txid is not Core's first-kernel hash | Open: needs BLAKE3 in rust-litecoin (MSRV 1.56.1) |
-| F-39 | R-6 | Low | PSBT `combine` merged MWEB maps by position | Fixed in rust-litecoin, unreleased |
-| F-40 | R-9 | Info | Transaction parse accepted encodings Core rejects | Fixed in rust-litecoin, unreleased |
+| F-39 | R-6 | Low | PSBT `combine` merged MWEB maps by position | Fixed |
+| F-40 | R-9 | Info | Transaction parse accepted encodings Core rejects | Fixed |
 | F-41 | P-10 | Info | grin bulletproof scratch-frame leak (cannot accumulate) | Carry Core's patch if vendored |
 
 ---

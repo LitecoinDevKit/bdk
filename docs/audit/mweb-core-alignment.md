@@ -4,9 +4,8 @@ Scope: the MWEB funds path in `bdk_mweb`, the pinned `rust-litecoin` codecs and
 PSBT extract (`5a0233712bdefc568fb45d71f42c028e196c4352`), and the `bdk_wallet`
 facade, checked against Litecoin Core 0.21.5.5 through 0.21.5.8.
 
-Four findings (P-1, R-1, R-2, R-3) are under embargo. This file names them and
-tracks their status only; details stay out of this public repository until the
-coordinated release.
+All fixes are released: rust-litecoin `90fc904` (LitecoinDevKit
+`mweb-psbt-typed-maps`) and this branch, which pins it.
 
 Status key: `[x]` done, `[ ]` open, `[~]` partially done.
 
@@ -18,14 +17,13 @@ Status key: `[x]` done, `[ ]` open, `[~]` partially done.
   and permissive relay policy; the full mainnet MWEB UTXO set (59,344 outputs)
   and every MWEB-era mainnet block (939,017) decoded with LDK's decoders.
 - **What was found.** 13 audit findings (P-1 to P-13) and 9 from the
-  independent review (R-1 to R-9). Two are High and embargoed (P-1, R-1). Both
-  are reproduced on regtest, neither has ever occurred on mainnet, and both are
-  fixed but not yet released. The worst non-embargoed one let a caller author
-  an OP_RETURN peg-out that relays and burns its value (P-2).
-- **What is fixed.** Everything except R-5 (deferred, below). Fixes to
-  rust-litecoin (P-1, R-1, R-2, P-5, R-4, R-6, R-9) and the embargoed bdk
-  changes ship together in the coordinated release; the rest is on the
-  `audit/public-fixes` branch.
+  independent review (R-1 to R-9). Two are High (P-1, R-1): consensus-valid
+  data that LDK's decoders rejected, so one mined block could stall every LDK
+  client. Both reproduced on regtest; neither has ever occurred on mainnet. The
+  worst funds issue let a caller author an OP_RETURN peg-out that relays and
+  burns its value (P-2).
+- **What is fixed.** Everything except R-5 (deferred, below). The rust-litecoin
+  fixes (P-1, R-1, R-2, P-5, R-4, R-6, R-9) are in `90fc904`.
 
 ## Residual risk after these fixes
 
@@ -96,7 +94,7 @@ Note on Core commit IDs: 0.21.5.6 shipped as a single squashed commit
 | 0.21.5.5 | `a549004385` kernel lock height enforced | LDK never sets one; extract bounds it | P-5 |
 | 0.21.5.5 | `c25bf8923c` peg-out scripts must be standard | wallet script types only, non-dust | P-2 |
 | 0.21.5.5 | frozen MWEB output IDs | excluded from balance and selection | P-4 |
-| 0.21.5.6 | `cfdfcf57aa` | embargoed | P-1 |
+| 0.21.5.6 | `cfdfcf57aa` output Ko/Ke validity (relay policy and wallet only, not consensus) | decoder rejected off-curve Ko/Ke; now raw bytes, checked lazily | P-1 |
 | 0.21.5.6 | `b250b016a9` / `67580d6e35` empty-pegout soft fork | extract rejects it; kernel ID follows Core | P-5, P-9 |
 | 0.21.5.6 | `109ed13b73` / `dc72334202` 4,000 weight / 1,000 input relay cap | enforced | P-2 |
 | 0.21.5.6 | `4dd6aeeb97` / `136695e050` mutated blocks | node-side; covered by anchoring | checked |
@@ -111,11 +109,11 @@ Note on Core commit IDs: 0.21.5.6 shipped as a single squashed commit
 
 | ID | Severity | Status | Fix | Regression test |
 | --- | --- | --- | --- | --- |
-| P-1 | High | Embargoed; fixed, unreleased | — | — |
+| P-1 | High | Fixed | rust-litecoin decoded output Ko and Ke as curve points; consensus does not require it. One mined off-curve output made every `mwebutxos` batch carrying it undecodable (classed as banworthy, so honest peers were banned and full sync never finished) and its block undecodable for `bdk_bitcoind_rpc`; an off-curve Ko can never be spent, so it would stay forever. Ko/Ke are now raw `[u8; 33]` with checked accessors, and `rewind_output` treats them as not ours | `core_offcurve_output.rs` (regtest, Core 0.21.5.8), `scan::tests::off_curve_ko_or_ke_is_not_ours_and_does_not_abort_the_batch`, rust-litecoin `output_with_off_curve_ko_and_ke_decodes` |
 | P-2 | Medium | Fixed | `bdk_mweb::policy`: fee ≥ weight x 100, ≤ 4,000 weight, ≤ 1,000 inputs, peg-outs only to P2PKH/P2SH/P2WPKH/P2WSH/P2TR above dust; `MwebTxBuilder::skip_relay_policy_checks` for node-policy tests | `tests/policy_guardrails.rs`, `tests/core_policy_guardrails.rs` |
 | P-3 | Low | Fixed | `CanonicalTxOut::is_hogex_pegout`; `is_mature` applies `PEGOUT_MATURITY` | `test_canonical_view.rs::test_hogex_pegout_is_immature_for_six_blocks` |
 | P-4 | Low | Fixed | `FROZEN_MWEB_OUTPUT_IDS` excluded from balance and selection | `tests/coin_db_parity.rs` |
-| P-5 | Low | Fixed in rust-litecoin, unreleased | extract derives or validates feature bytes, checked casts, exact field lengths | `tests/kernel_codec_parity.rs` (ignored here until the rust-litecoin bump), fuzz `psbt_extract --features audit-red` |
+| P-5 | Low | Fixed | extract derives or validates feature bytes, checked casts, exact field lengths | `tests/kernel_codec_parity.rs`, fuzz `psbt_extract --features audit-red` |
 | P-6 | Medium | Fixed | sync restores a locally spent coin whose leaf stays unspent for `UNCONFIRMED_SPEND_GRACE_BLOCKS` (12); `ChangeSet::restored` persists the undo | `mweb_sync::tests::differential_sync_restores_coin_whose_spend_never_confirmed`, `changeset::tests::merge_restored_undoes_an_earlier_spend` |
 | P-7 | Low | Fixed | `sign_mweb_components` scrubs input secrets | `psbt::tests::finished_mweb_tx_maps_roundtrip_and_extract` |
 | P-8 | Low | Fixed | `hash::secret_from_hash` at every point Core uses `FromHash` | `hash::tests::secret_from_hash_matches_core` |
@@ -124,15 +122,15 @@ Note on Core commit IDs: 0.21.5.6 shipped as a single squashed commit
 | P-11 | Low | Fixed | `MwebBalance::immature` | `tests/coin_db_parity.rs` |
 | P-12 | Low | Fixed | commitments re-checked on load; `rejected_on_load` | `tests/coin_db_parity.rs` |
 | P-13 | Low | Fixed | `dnsseed.ltcpool.org` | — |
-| R-1 | High | Embargoed; fixed, unreleased | — | — |
-| R-2 | Medium | Embargoed; fixed, unreleased | — | — |
-| R-3 | Medium | Embargoed; fixed, unreleased | — | — |
-| R-4 | Medium | Fixed in rust-litecoin, unreleased | `compute_wtxid` follows Core for every block transaction | rust-litecoin `hogex_block_witness_commitment_verifies` |
+| R-1 | High | Fixed | rust-litecoin read a block's MWEB extension only when header version bit 29 was set; Core reads it whenever the block ends in a HogEx, and any version ≥ 0x20000000 is valid, so a miner could stall `bdk_bitcoind_rpc` with a valid block. Now follows Core | rust-litecoin `hogex_block_without_version_bit_29_decodes`; reproduced on regtest with `-blockversion` |
+| R-2 | Medium | Fixed | the index in a global MWEB PSBT key sized an allocation (`0xffffffff` exhausted memory); now bounded by consensus maxima | rust-litecoin `decode_rejects_mweb_map_index_beyond_consensus_limits` |
+| R-3 | Medium | Fixed | `psbt_from_ltcd_v2` reserved memory from untrusted section counts; now bounded | `ltcd_psbt_fixtures::ltcd_v2_rejects_untrusted_section_counts` |
+| R-4 | Medium | Fixed | `compute_wtxid` follows Core for every block transaction | rust-litecoin `hogex_block_witness_commitment_verifies` |
 | R-5 | Low | Open | needs BLAKE3 in rust-litecoin (MSRV) | — |
-| R-6 | Low | Fixed in rust-litecoin, unreleased | PSBT `combine` pairs MWEB maps by id, commitment, excess | rust-litecoin `combine_pairs_mweb_inputs_by_output_id` |
+| R-6 | Low | Fixed | PSBT `combine` pairs MWEB maps by id, commitment, excess | rust-litecoin `combine_pairs_mweb_inputs_by_output_id` |
 | R-7 | Low | Fixed | `sign_mweb_components` refuses unsigned inputs | `psbt::tests::finished_mweb_tx_maps_roundtrip_and_extract` |
 | R-8 | Low | Fixed | redacted `Debug`; `Zeroizing` in `sign_funded_mweb` | — |
-| R-9 | Info | Fixed in rust-litecoin, unreleased | reject superfluous witness flag with MWEB and presence bytes 2-255 | rust-litecoin `rejects_superfluous_witness_flag_and_bad_mweb_presence_byte` |
+| R-9 | Info | Fixed | reject superfluous witness flag with MWEB and presence bytes 2-255 | rust-litecoin `rejects_superfluous_witness_flag_and_bad_mweb_presence_byte` |
 
 Notes:
 
@@ -161,10 +159,10 @@ Crypto and proofs
 - [x] `FromHash` fallback ported (P-8).
 
 Parsing and serialization
-- [x] Strictness table: every field rust-litecoin validates at decode compared with Core consensus (embargoed details in the private report).
+- [x] Strictness table: of the keys rust-litecoin validated at decode, only output Ko and Ke were stricter than Core consensus (P-1); Ks, input keys and the kernel stealth excess are required valid by Core's signature and stealth-sum checks. Mainnet UTXO set at 3,205,231: 0 of 59,344 outputs have an off-curve key.
 - [x] Kernel codec matches Core's `Kernel::Serialize` for all canonical feature combinations (`kernel_codec_parity`, fuzz `kernel_codec`).
 - [x] Kernel ID follows Core for non-canonical kernels (P-9).
-- [x] Extract canonicalizes or rejects (P-5, rust-litecoin, unreleased).
+- [x] Extract canonicalizes or rejects (P-5).
 - [x] Historical census of mainnet blocks (heights 2,265,984 to 3,205,000; 939,017 MWEB blocks): 0 decode failures with the strict `Block` decoder, 0 non-canonical or non-standard kernels.
 - [ ] MWEB-only txid (R-5).
 
@@ -176,7 +174,7 @@ Peg-in, peg-out, spend
 - [x] Signer trust model (P-7, R-7).
 
 Receive scanning
-- [x] Hostile outputs return "not ours" per output rather than abort a batch (embargoed fix, unreleased).
+- [x] Hostile outputs return "not ours" per output rather than abort a batch (P-1).
 - [x] Step order matches Core `RewindOutput`.
 - [x] `MAX_MONEY` fail-closed check is reachable only for outputs that are not on chain.
 
@@ -187,7 +185,7 @@ Coin database
 - [ ] Reorg (`invalidateblock`) across a peg-in and a peg-out asserting value conservation (regtest scenario not yet written).
 
 Sync integrity
-- [~] Decoders accept everything consensus accepts (embargoed fixes, unreleased), so a decode failure is again evidence against the peer. Not banning on anchored-data decode failures, as defense in depth, is a separate peer-scoring change.
+- [~] Decoders accept everything consensus accepts (P-1, R-1), so a decode failure is again evidence against the peer. Not banning on anchored-data decode failures, as defense in depth, is a separate peer-scoring change.
 - [x] F-21 throttling still behaves on 0.21.5.8 (`lip0006_throttle`).
 - [ ] Header source on 0.21.5.7+ and stale-tip detection.
 
@@ -202,7 +200,7 @@ Wallet facade (`bdk_wallet`, separate repository)
 Operational
 - [x] DNS seed updated (P-13).
 - [ ] Broadcast via 0.21.5.8+ and confirm by txid/wtxid.
-- [ ] `SECURITY.md` routes reports to upstream `bitcoindevkit`; LDK needs its own channel before disclosure.
+- [x] `SECURITY.md` (here and in rust-litecoin) routes reports to GitHub private vulnerability reporting on LitecoinDevKit.
 
 Pre-existing gaps noticed, not from this audit
 - [ ] `cargo test -p bdk_mweb --no-default-features --features std,persist` has 9 failing tests that need `zkp` but are not gated on it.
@@ -221,9 +219,6 @@ Pre-existing gaps noticed, not from this audit
 | `crates/mweb/src/policy.rs`, `hash.rs`, `mweb_sync.rs`, `changeset.rs` (test modules) | P-2, P-8, P-6 |
 | `crates/chain/tests/test_canonical_view.rs` | P-3 |
 | `crates/mweb/fuzz/fuzz_targets/{kernel_codec,psbt_extract}.rs` | new fuzz targets (`audit-red` asserts P-5's fixed behaviour) |
+| `crates/mweb/tests/core_offcurve_output.rs` | P-1 regression against Core 0.21.5.8 |
+| `crates/mweb/examples/scan_mweb_utxo_keys.rs` | mainnet MWEB UTXO-set key and frozen-output census over LIP-0006 |
 | `crates/mweb/examples/scan_mweb_blocks_decode.rs` | mainnet block decode and kernel census over RPC |
-
-## Embargo
-
-Until P-1, R-1, R-2 and R-3 are released, keep the embargoed branches and the
-private report off any public remote.
