@@ -213,6 +213,7 @@ impl MwebCoinDatabase {
             #[cfg(feature = "persist")]
             {
                 self.staged.coins.remove(output_id);
+                self.staged.restored.remove(output_id);
                 self.staged.spent.insert(*output_id, coin.clone());
             }
             self.spent.insert(*output_id, coin);
@@ -220,6 +221,28 @@ impl MwebCoinDatabase {
         } else {
             false
         }
+    }
+
+    /// Undo a spend that never confirmed: move `output_id` back to unspent.
+    ///
+    /// Returns `false` when it is not in the spent set.
+    pub fn restore_spent(&mut self, output_id: &[u8; 32]) -> bool {
+        let Some(coin) = self.spent.remove(output_id) else {
+            return false;
+        };
+        #[cfg(feature = "persist")]
+        {
+            self.staged.spent.remove(output_id);
+            self.staged.coins.insert(*output_id, coin.clone());
+            self.staged.restored.insert(*output_id);
+        }
+        self.coins.insert(*output_id, coin);
+        true
+    }
+
+    /// Spent coins still retained.
+    pub fn spent_coins(&self) -> impl Iterator<Item = &MwebCoin> {
+        self.spent.values()
     }
 
     /// Sum of all unspent amounts (confirmed and pending).
@@ -368,6 +391,9 @@ impl MwebCoinDatabase {
 
     /// Apply a changeset without staging (used on load / replay).
     pub fn apply_changeset(&mut self, cs: ChangeSet) {
+        for id in &cs.restored {
+            self.spent.remove(id);
+        }
         for (id, coin) in cs.coins {
             if self.spent.contains_key(&id) {
                 continue;

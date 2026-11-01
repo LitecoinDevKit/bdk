@@ -175,6 +175,9 @@ pub struct SyncResult {
     pub found: Vec<MwebCoin>,
     /// Local coins marked spent because their output id was absent from the UTXO set.
     pub spent: Vec<[u8; 32]>,
+    /// Coins marked spent locally that stayed unspent on chain for
+    /// [`crate::mweb_sync::UNCONFIRMED_SPEND_GRACE_BLOCKS`] and were restored.
+    pub restored: Vec<[u8; 32]>,
     /// Number of FULL_UTXO outputs downloaded.
     pub downloaded: usize,
     /// MWEB header used for verification (when fetched).

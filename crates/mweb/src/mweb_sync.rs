@@ -90,6 +90,16 @@ pub fn diff_leafsets(old: &[u8], new: &[u8]) -> LeafsetDiff {
 /// How often [`MwebSyncer::run_once`] invokes the optional checkpoint callback.
 pub const CHECKPOINT_EVERY_BATCHES: usize = 50;
 
+/// Blocks a coin marked spent locally may stay unspent on chain before a sync
+/// pass restores it.
+///
+/// Wallets mark inputs spent when they broadcast, before the spend confirms. A
+/// spend that is rejected, evicted or never mined would otherwise hide the coin
+/// until a full resync. Restoring is safe even if the original spend later
+/// confirms: an MWEB output can be spent once, so a second spend of the
+/// restored coin is refused by nodes and the next pass marks it spent again.
+pub const UNCONFIRMED_SPEND_GRACE_BLOCKS: u32 = 12;
+
 /// Observable progress of the UTXO download phase of [`MwebSyncer::run_once`].
 ///
 /// Attach a clone of an `Arc<SyncProgress>` via [`MwebSyncer::progress`] and read the
@@ -136,6 +146,10 @@ pub struct SyncState {
     /// Last leaf index successfully fetched for [`Self::pending_tip_hash`] (inclusive).
     #[cfg_attr(feature = "serde", serde(default))]
     pub utxo_cursor: Option<u64>,
+    /// Leaf index → tip height at which a coin marked spent locally was first
+    /// seen still unspent on chain. See [`UNCONFIRMED_SPEND_GRACE_BLOCKS`].
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub unconfirmed_spends: BTreeMap<u64, u32>,
 }
 
 impl SyncState {
@@ -851,6 +865,25 @@ impl MwebSyncer {
         for leaf in &diff.removed {
             if let Some(id) = db.mark_spent_by_leaf_index(*leaf) {
                 result.spent.push(id);
+            }
+        }
+
+        // Coins marked spent locally whose leaf the chain still has unspent.
+        let still_unspent: BTreeMap<u64, [u8; 32]> = db
+            .spent_coins()
+            .filter_map(|c| Some((c.leaf_index?, c.output_id)))
+            .filter(|(leaf, _)| leafset_has_leaf(&leafset.leafset, *leaf))
+            .collect();
+        state
+            .unconfirmed_spends
+            .retain(|leaf, _| still_unspent.contains_key(leaf));
+        for (leaf, id) in still_unspent {
+            let first_seen = *state.unconfirmed_spends.entry(leaf).or_insert(tip_height);
+            if tip_height.saturating_sub(first_seen) >= UNCONFIRMED_SPEND_GRACE_BLOCKS
+                && db.restore_spent(&id)
+            {
+                state.unconfirmed_spends.remove(&leaf);
+                result.restored.push(id);
             }
         }
 
@@ -1621,13 +1654,11 @@ mod tests {
         (source.utxo_calls, state)
     }
 
-    /// P-6: a coin marked spent locally (as the FFI asks after a broadcast) whose
-    /// spend is never mined keeps its leaf in the chain's leafset. A differential
-    /// pass only fetches newly added leaves, so the coin stays hidden until a
-    /// full resync.
+    /// A coin marked spent locally (as the FFI asks after a broadcast) whose spend
+    /// is never mined keeps its leaf in the chain's leafset. It stays hidden for
+    /// [`UNCONFIRMED_SPEND_GRACE_BLOCKS`], then a differential pass restores it.
     #[cfg(feature = "std")]
     #[test]
-    #[ignore = "P-6 red test: locally marked spends are never reconciled against the leafset"]
     fn differential_sync_restores_coin_whose_spend_never_confirmed() {
         use crate::keys::{MasterKeyScheme, MasterKeys};
 
@@ -1662,37 +1693,69 @@ mod tests {
             leaf_index: Some(1),
         });
         assert!(db.mark_spent(&[9; 32]));
+        let _ = db.take_staged();
 
-        // Next block: leaf 1 is still unspent on chain.
-        let mut source = CountingSource {
-            leafset: MwebLeafset::from_indices(hash_b, &[0, 1, 2, 3]),
-            utxo_calls: 0,
-        };
-        let mut headers = FixedHeaderProvider::tip_only(hash_b, 11);
-        headers.hashes.insert(10, hash_a);
         let syncer = MwebSyncer {
             verify: crate::lip0006::VerifyMode::Trusted,
             ..MwebSyncer::tip_only()
         };
-        syncer
-            .run_once(
-                &headers,
-                &mut ReadyNotifier { tip_height: 11 },
-                &mut source,
-                &mut state,
-                &keys,
-                &book,
-                &mut db,
-                &secp,
-                None,
-            )
-            .unwrap();
+        // Extend the tip from (prev_hash, height - 1) to (hash, height); leaf 1
+        // stays unspent on chain throughout.
+        let pass = |state: &mut SyncState,
+                    db: &mut MwebCoinDatabase,
+                    prev_hash: BlockHash,
+                    hash: BlockHash,
+                    height: u32,
+                    leaves: &[u64]| {
+            let mut source = CountingSource {
+                leafset: MwebLeafset::from_indices(hash, leaves),
+                utxo_calls: 0,
+            };
+            let mut headers = FixedHeaderProvider::tip_only(hash, height);
+            headers.hashes.insert(state.tip_height.unwrap(), prev_hash);
+            syncer
+                .run_once(
+                    &headers,
+                    &mut ReadyNotifier { tip_height: height },
+                    &mut source,
+                    state,
+                    &keys,
+                    &book,
+                    db,
+                    &secp,
+                    None,
+                )
+                .unwrap()
+        };
 
-        assert!(
-            db.get(&[9; 32]).is_some(),
-            "coin whose leaf is unspent on chain is still hidden"
+        let first = pass(&mut state, &mut db, hash_a, hash_b, 11, &[0, 1, 2, 3]);
+        assert!(first.restored.is_empty());
+        assert!(db.get(&[9; 32]).is_none(), "the spend may still confirm");
+
+        let hash_c = BlockHash::from_byte_array([0xcc; 32]);
+        let later = pass(
+            &mut state,
+            &mut db,
+            hash_b,
+            hash_c,
+            11 + UNCONFIRMED_SPEND_GRACE_BLOCKS,
+            &[0, 1, 2, 3, 4],
         );
+        assert_eq!(later.restored, vec![[9; 32]]);
         assert_eq!(db.balance(), 50_000);
+        assert!(state.unconfirmed_spends.is_empty());
+
+        // The restore persists: replaying the staged changeset over the spend
+        // leaves the coin unspent.
+        use bdk_core::Merge;
+        let mut replay = crate::ChangeSet::default();
+        replay
+            .spent
+            .insert([9; 32], db.get(&[9; 32]).unwrap().clone());
+        replay.merge(db.take_staged());
+        assert!(MwebCoinDatabase::from_changeset(replay)
+            .get(&[9; 32])
+            .is_some());
     }
 
     #[cfg(feature = "std")]
