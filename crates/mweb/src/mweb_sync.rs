@@ -788,6 +788,12 @@ impl MwebSyncer {
             if state.height_map.contains_key(&height) {
                 continue;
             }
+            // When `run_once` will fetch and anchor `tip_hash` immediately after
+            // this call, skip probing `tip_height` here so `tip_hash` is fetched
+            // once at the verification step rather than twice.
+            if height == tip_height && self.verify.needs_header() {
+                continue;
+            }
             let Ok(hash) = headers.block_hash_at(height) else {
                 continue;
             };
@@ -800,11 +806,13 @@ impl MwebSyncer {
                 Err(_) => continue,
             }
         }
-        let (tip_hash, _) = headers.tip()?;
-        if let Ok(msg) = source.get_header(tip_hash) {
-            state
-                .height_map
-                .insert(tip_height, msg.mweb_header.output_mmr_size);
+        if !state.height_map.contains_key(&tip_height) && !self.verify.needs_header() {
+            let (tip_hash, _) = headers.tip()?;
+            if let Ok(msg) = source.get_header(tip_hash) {
+                state
+                    .height_map
+                    .insert(tip_height, msg.mweb_header.output_mmr_size);
+            }
         }
         Ok(())
     }

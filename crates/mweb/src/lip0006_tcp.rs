@@ -130,6 +130,62 @@ pub enum BroadcastAck {
     Sent,
 }
 
+/// Connection, timeout, and retry policy for [`TcpMwebPeer`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PeerPolicy {
+    /// TCP connect timeout.
+    pub connect_timeout: std::time::Duration,
+    /// Wall-clock deadline for completing the `version` / `verack` handshake.
+    pub handshake_timeout: std::time::Duration,
+    /// Wall-clock deadline for one single-message stage (`get_header`,
+    /// `get_leafset`, or a single-batch `get_utxos`).
+    pub stage_timeout: std::time::Duration,
+    /// Wall-clock deadline for one pipelined `get_utxos_pipelined` round.
+    pub pipeline_round_timeout: std::time::Duration,
+    /// Socket write timeout.
+    pub write_timeout: std::time::Duration,
+    /// Same-peer reconnect attempts on transient I/O faults (`0` = fail over immediately).
+    pub max_reconnects: u32,
+    /// Consecutive empty/throttled rounds before returning a throttle/lag error.
+    pub max_throttled_rounds: u32,
+    /// Flush `get_header` with `ping`/`pong` so a silent drop or lagging tip
+    /// returns in 1 RTT instead of waiting out `stage_timeout`.
+    pub ping_flush_header: bool,
+}
+
+impl Default for PeerPolicy {
+    fn default() -> Self {
+        Self {
+            connect_timeout: std::time::Duration::from_secs(10),
+            handshake_timeout: std::time::Duration::from_secs(10),
+            stage_timeout: std::time::Duration::from_secs(30),
+            pipeline_round_timeout: RECV_UNTIL_DEADLINE,
+            write_timeout: std::time::Duration::from_secs(30),
+            max_reconnects: 3,
+            max_throttled_rounds: MAX_CONSECUTIVE_THROTTLED_ROUNDS,
+            ping_flush_header: true,
+        }
+    }
+}
+
+impl PeerPolicy {
+    /// Interactive wallet policy: tight per-stage timeouts, `ping`/`pong`-flushed
+    /// header requests, and zero same-peer reconnects so a lagging or wedged peer
+    /// rotates immediately to the next candidate in the pool.
+    pub fn fast_failover() -> Self {
+        Self {
+            connect_timeout: std::time::Duration::from_secs(3),
+            handshake_timeout: std::time::Duration::from_secs(4),
+            stage_timeout: std::time::Duration::from_secs(6),
+            pipeline_round_timeout: std::time::Duration::from_secs(15),
+            write_timeout: std::time::Duration::from_secs(6),
+            max_reconnects: 0,
+            max_throttled_rounds: 1,
+            ping_flush_header: true,
+        }
+    }
+}
+
 /// TCP peer implementing [`MwebUtxoSource`].
 pub struct TcpMwebPeer {
     stream: TcpStream,
@@ -143,17 +199,30 @@ pub struct TcpMwebPeer {
     /// (`f24dec1`), so this survives [`TcpMwebPeer::reconnect`] too — dropping it
     /// there would just relearn the same limit from scratch every reconnect.
     serve_window: usize,
+    policy: PeerPolicy,
+    last_stage: &'static str,
+    header_cache: BTreeMap<BlockHash, Result<MwebHeaderMsg, Error>>,
+    header_fetches: usize,
 }
 
 impl TcpMwebPeer {
-    /// Connect and complete version/verack handshake.
+    /// Connect and complete version/verack handshake using [`PeerPolicy::default`].
     pub fn connect(addr: impl ToSocketAddrs, network: Network) -> Result<Self, Error> {
+        Self::connect_with_policy(addr, network, PeerPolicy::default())
+    }
+
+    /// Connect and complete version/verack handshake under an explicit [`PeerPolicy`].
+    pub fn connect_with_policy(
+        addr: impl ToSocketAddrs,
+        network: Network,
+        policy: PeerPolicy,
+    ) -> Result<Self, Error> {
         let sock = addr
             .to_socket_addrs()
             .map_err(|e| Error::Crypto(alloc::format!("resolve: {e}")))?
             .next()
             .ok_or_else(|| Error::Crypto("no address resolved".into()))?;
-        Self::connect_sock(sock, sock.to_string(), network)
+        Self::connect_sock(sock, sock.to_string(), network, policy)
     }
 
     /// Peer address string used for reconnect / [`crate::mweb_sync::PeerPool`] bans.
@@ -166,20 +235,38 @@ impl TcpMwebPeer {
         self.addr.parse().ok()
     }
 
+    /// Active connection/timeout policy.
+    pub fn policy(&self) -> PeerPolicy {
+        self.policy
+    }
+
+    /// Update the active policy for subsequent requests on this peer.
+    pub fn set_policy(&mut self, policy: PeerPolicy) {
+        self.policy = policy;
+    }
+
+    /// Name of the most recent LIP-0006 stage (`connect`, `handshake`,
+    /// `get_header`, `get_leafset`, `get_utxos`).
+    pub fn last_stage(&self) -> &'static str {
+        self.last_stage
+    }
+
+    /// Number of wire `get_header` requests issued on this connection (excluding
+    /// memoized hits).
+    pub fn header_fetches(&self) -> usize {
+        self.header_fetches
+    }
+
     fn connect_sock(
         sock: std::net::SocketAddr,
         addr_str: String,
         network: Network,
+        policy: PeerPolicy,
     ) -> Result<Self, Error> {
-        let stream = TcpStream::connect(sock)
-            .map_err(|e| Error::Crypto(alloc::format!("tcp connect: {e}")))?;
-        // Long UTXO syncs need generous timeouts (litecoind may stall under load).
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(180)))
-            .ok();
-        stream
-            .set_write_timeout(Some(std::time::Duration::from_secs(60)))
-            .ok();
+        let stream = TcpStream::connect_timeout(&sock, policy.connect_timeout)
+            .map_err(|e| Error::transport(alloc::format!("tcp connect: {e}")))?;
+        stream.set_read_timeout(Some(policy.stage_timeout)).ok();
+        stream.set_write_timeout(Some(policy.write_timeout)).ok();
         let magic = network.magic();
         let mut peer = Self {
             stream,
@@ -187,6 +274,10 @@ impl TcpMwebPeer {
             addr: addr_str,
             network,
             serve_window: MWEB_SERVE_BURST,
+            policy,
+            last_stage: "handshake",
+            header_cache: BTreeMap::new(),
+            header_fetches: 0,
         };
         peer.handshake()?;
         Ok(peer)
@@ -200,8 +291,9 @@ impl TcpMwebPeer {
             .map_err(|e| Error::Crypto(alloc::format!("resolve: {e}")))?
             .next()
             .ok_or_else(|| Error::Crypto("no address resolved".into()))?;
-        let mut fresh = Self::connect_sock(sock, self.addr.clone(), self.network)?;
+        let mut fresh = Self::connect_sock(sock, self.addr.clone(), self.network, self.policy)?;
         fresh.serve_window = self.serve_window;
+        fresh.last_stage = self.last_stage;
         *self = fresh;
         Ok(())
     }
@@ -293,16 +385,16 @@ impl TcpMwebPeer {
         // Budget for the payloads themselves plus unrelated traffic (addr, inv,
         // feefilter, the peer's own pings) interleaved with them.
         let budget = max_payloads.saturating_mul(2).saturating_add(64);
-        let deadline = std::time::Instant::now() + RECV_UNTIL_DEADLINE;
+        let round_timeout = if max_payloads <= 1 {
+            self.policy.stage_timeout
+        } else {
+            self.policy.pipeline_round_timeout
+        };
+        let deadline = std::time::Instant::now() + round_timeout;
         let mut out: Vec<Vec<u8>> = Vec::new();
 
         for _ in 0..budget {
-            if std::time::Instant::now() >= deadline {
-                return Err(Error::transport(alloc::format!(
-                    "p2p: timed out collecting {want} (deadline exceeded)"
-                )));
-            }
-            let msg = self.recv()?;
+            let msg = self.recv_before(deadline, want)?;
             let cmd = msg.command().to_string();
             match msg.payload() {
                 NetworkMessage::Pong(n) if *n == nonce => return Ok(out),
@@ -364,16 +456,17 @@ impl TcpMwebPeer {
         &mut self,
         mut op: impl FnMut(&mut Self) -> Result<T, Error>,
     ) -> Result<T, Error> {
-        // Retry briefly to ride out a single dropped socket, then give up: sync
-        // progress is checkpointed (utxo cursor / differential state), the peer
-        // pool rotates on failure, and callers re-run sync shortly after. A dead
-        // or misbehaving peer must not stall the caller for minutes.
-        const MAX_ATTEMPTS: u32 = 4;
+        // Retry briefly to ride out a single dropped socket when policy allows,
+        // then give up: sync progress is checkpointed (utxo cursor / differential
+        // state), the peer pool rotates on failure, and callers re-run sync
+        // shortly after. Under `PeerPolicy::fast_failover`, `max_reconnects` is 0
+        // so a stalled or dead peer rotates immediately.
+        let max_attempts = self.policy.max_reconnects.saturating_add(1);
         let mut attempt = 0u32;
         loop {
             match op(self) {
                 Ok(v) => return Ok(v),
-                Err(e) if Self::is_transient(&e) && attempt + 1 < MAX_ATTEMPTS => {
+                Err(e) if Self::is_transient(&e) && attempt + 1 < max_attempts => {
                     attempt += 1;
                     let sleep_ms = (500u64 * (1u64 << attempt.min(6))).min(2_000);
                     #[cfg(feature = "std")]
@@ -381,7 +474,7 @@ impl TcpMwebPeer {
                         eprintln!(
                             "warn: P2P error ({e}); reconnecting to {} in {sleep_ms}ms (attempt {attempt}/{})…",
                             self.addr,
-                            MAX_ATTEMPTS - 1
+                            max_attempts - 1
                         );
                         std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
                     }
@@ -399,6 +492,7 @@ impl TcpMwebPeer {
     }
 
     fn handshake(&mut self) -> Result<(), Error> {
+        let deadline = std::time::Instant::now() + self.policy.handshake_timeout;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
@@ -422,7 +516,7 @@ impl TcpMwebPeer {
         let mut saw_version = false;
         let mut saw_verack = false;
         for _ in 0..16 {
-            let msg = self.recv()?;
+            let msg = self.recv_before(deadline, "handshake")?;
             match msg.payload() {
                 NetworkMessage::Version(_) => {
                     self.send(NetworkMessage::Verack)?;
@@ -482,19 +576,46 @@ impl TcpMwebPeer {
     }
 
     fn recv(&mut self) -> Result<RawNetworkMessage, Error> {
+        let deadline = std::time::Instant::now() + self.policy.stage_timeout;
+        self.recv_before(deadline, self.last_stage)
+    }
+
+    fn recv_before(
+        &mut self,
+        deadline: std::time::Instant,
+        want: &str,
+    ) -> Result<RawNetworkMessage, Error> {
+        let remaining = deadline
+            .checked_duration_since(std::time::Instant::now())
+            .filter(|d| !d.is_zero())
+            .ok_or_else(|| {
+                Error::transport(alloc::format!(
+                    "p2p: timed out collecting {want} (deadline exceeded)"
+                ))
+            })?;
+        self.stream.set_read_timeout(Some(remaining)).ok();
         let mut header = [0u8; 24];
         self.stream
             .read_exact(&mut header)
-            .map_err(|e| Error::transport(alloc::format!("p2p read header: {e}")))?;
+            .map_err(|e| Error::transport(alloc::format!("p2p read header ({want}): {e}")))?;
         // Validate magic and bound the length *before* allocating: the declared
         // length is peer-controlled, and `deserialize` only checks magic and
         // checksum after the buffer already exists.
         let len = frame_payload_len(self.magic, &header)?;
         let mut payload = vec![0u8; len];
         if len > 0 {
+            let remaining = deadline
+                .checked_duration_since(std::time::Instant::now())
+                .filter(|d| !d.is_zero())
+                .ok_or_else(|| {
+                    Error::transport(alloc::format!(
+                        "p2p: timed out reading {want} payload (deadline exceeded)"
+                    ))
+                })?;
+            self.stream.set_read_timeout(Some(remaining)).ok();
             self.stream
                 .read_exact(&mut payload)
-                .map_err(|e| Error::transport(alloc::format!("p2p read payload: {e}")))?;
+                .map_err(|e| Error::transport(alloc::format!("p2p read payload ({want}): {e}")))?;
         }
         parse_frame(self.magic, &header, &payload)
     }
@@ -503,14 +624,9 @@ impl TcpMwebPeer {
         // The message counter alone is not a bound on time: each `recv` can block for
         // the full socket read timeout, so 64 messages of filler can stall a single
         // call for hours. Cap wall-clock time as well.
-        let deadline = std::time::Instant::now() + RECV_UNTIL_DEADLINE;
+        let deadline = std::time::Instant::now() + self.policy.stage_timeout;
         for _ in 0..64 {
-            if std::time::Instant::now() >= deadline {
-                return Err(Error::transport(alloc::format!(
-                    "p2p: timed out waiting for {want} (deadline exceeded)"
-                )));
-            }
-            let msg = self.recv()?;
+            let msg = self.recv_before(deadline, want)?;
             let cmd = msg.command().to_string();
             match msg.payload() {
                 NetworkMessage::Unknown { command, payload }
@@ -1013,12 +1129,36 @@ mod broadcast_tests {
 
 impl MwebUtxoSource for TcpMwebPeer {
     fn get_header(&mut self, block_hash: BlockHash) -> Result<MwebHeaderMsg, Error> {
-        self.with_reconnect(|this| {
-            let inv: Vec<Inventory> = vec![mweb_inv(MSG_MWEB_HEADER, block_hash)];
-            this.send(NetworkMessage::GetData(inv))?;
-            let payload = this.recv_until_cmd("mwebheader")?;
-            MwebHeaderMsg::from_payload(&payload)
-        })
+        self.last_stage = "get_header";
+        if let Some(cached) = self.header_cache.get(&block_hash) {
+            return cached.clone();
+        }
+        self.header_fetches = self.header_fetches.saturating_add(1);
+        let res = self.with_reconnect(|this| {
+            let rounds = this.policy.max_throttled_rounds.max(1);
+            for round in 0..rounds {
+                let inv: Vec<Inventory> = vec![mweb_inv(MSG_MWEB_HEADER, block_hash)];
+                this.send(NetworkMessage::GetData(inv))?;
+                if this.policy.ping_flush_header {
+                    let mut payloads = this.collect_until_pong("mwebheader", 1)?;
+                    if let Some(payload) = payloads.pop() {
+                        return MwebHeaderMsg::from_payload(&payload);
+                    }
+                    if round + 1 < rounds {
+                        std::thread::sleep(THROTTLE_REFILL_WAIT);
+                    }
+                } else {
+                    let payload = this.recv_until_cmd("mwebheader")?;
+                    return MwebHeaderMsg::from_payload(&payload);
+                }
+            }
+            Err(Error::throttled(alloc::format!(
+                "peer did not serve mwebheader for {block_hash} across {rounds} round(s) \
+                 (lagging tip or rate-limited; run your node with `-whitelist=noban@<client>`)"
+            )))
+        });
+        self.header_cache.insert(block_hash, res.clone());
+        res
     }
 
     /// Fetch the leafset, retrying if the peer's serving budget dropped the request.
@@ -1028,8 +1168,10 @@ impl MwebUtxoSource for TcpMwebPeer {
     /// these per pass and it gates everything after it, so a drop here would stall
     /// the whole sync on a read timeout.
     fn get_leafset(&mut self, block_hash: BlockHash) -> Result<MwebLeafset, Error> {
+        self.last_stage = "get_leafset";
         self.with_reconnect(|this| {
-            for _ in 0..MAX_CONSECUTIVE_THROTTLED_ROUNDS {
+            let rounds = this.policy.max_throttled_rounds.max(1);
+            for round in 0..rounds {
                 let inv: Vec<Inventory> = vec![mweb_inv(MSG_MWEB_LEAFSET, block_hash)];
                 this.send(NetworkMessage::GetData(inv))?;
                 let mut payloads = this.collect_until_pong("mwebleafset", 1)?;
@@ -1038,10 +1180,12 @@ impl MwebUtxoSource for TcpMwebPeer {
                     return MwebLeafset::consensus_decode(&mut cursor)
                         .map_err(|e| Error::protocol(alloc::format!("mwebleafset decode: {e}")));
                 }
-                std::thread::sleep(THROTTLE_REFILL_WAIT);
+                if round + 1 < rounds {
+                    std::thread::sleep(THROTTLE_REFILL_WAIT);
+                }
             }
             Err(Error::throttled(alloc::format!(
-                "peer dropped {MAX_CONSECUTIVE_THROTTLED_ROUNDS} getmwebleafset requests; \
+                "peer dropped {rounds} getmwebleafset request(s); \
                  litecoind 0.21.5.6+ rate-limits MWEB serving node-wide, so run the node with \
                  `-whitelist=noban@<client>` or use a less contended peer"
             )))
@@ -1049,15 +1193,19 @@ impl MwebUtxoSource for TcpMwebPeer {
     }
 
     fn get_utxos(&mut self, req: GetMwebUtxos) -> Result<MwebUtxos, Error> {
+        self.last_stage = "get_utxos";
         self.with_reconnect(|this| {
+            let rounds = this.policy.max_throttled_rounds.max(1);
             let round = [req.clone()];
-            for _ in 0..MAX_CONSECUTIVE_THROTTLED_ROUNDS {
+            for attempt in 0..rounds {
                 let responses = this.serve_round(&round)?;
                 let (mut served, _) = partition_round(&round, responses)?;
                 if let Some(batch) = served.pop() {
                     return Ok(batch);
                 }
-                std::thread::sleep(THROTTLE_REFILL_WAIT);
+                if attempt + 1 < rounds {
+                    std::thread::sleep(THROTTLE_REFILL_WAIT);
+                }
             }
             Err(throttled_error(1))
         })
@@ -1078,10 +1226,13 @@ impl MwebUtxoSource for TcpMwebPeer {
         reqs: &[GetMwebUtxos],
         on_batch: &mut dyn FnMut(MwebUtxos) -> Result<(), Error>,
     ) -> Result<(), Error> {
+        self.last_stage = "get_utxos";
         let mut window = self.serve_window;
-        let outcome = drive_serve_rounds(
+        let max_stalled = self.policy.max_throttled_rounds.max(1);
+        let outcome = drive_serve_rounds_with_limit(
             reqs,
             &mut window,
+            max_stalled,
             |round| self.serve_round(round),
             on_batch,
             std::thread::sleep,
@@ -1091,8 +1242,11 @@ impl MwebUtxoSource for TcpMwebPeer {
             Ok(()) => Ok(()),
             Err(e) => {
                 // Responses for requests we never read may still be queued on the
-                // socket; reconnect so later sequential requests don't consume them.
-                let _ = self.reconnect();
+                // socket; reconnect when policy allows so later sequential requests
+                // don't consume them.
+                if self.policy.max_reconnects > 0 {
+                    let _ = self.reconnect();
+                }
                 Err(e)
             }
         }
@@ -1109,9 +1263,32 @@ impl MwebUtxoSource for TcpMwebPeer {
 /// Termination: every iteration either delivers at least one batch or increments
 /// `stalled_rounds`, which is capped, so the loop cannot spin against a peer that
 /// accepts requests and answers none.
+#[cfg(test)]
 fn drive_serve_rounds<R, W>(
     reqs: &[GetMwebUtxos],
     window: &mut usize,
+    round_fn: R,
+    on_batch: &mut dyn FnMut(MwebUtxos) -> Result<(), Error>,
+    wait: W,
+) -> Result<(), Error>
+where
+    R: FnMut(&[GetMwebUtxos]) -> Result<Vec<MwebUtxos>, Error>,
+    W: FnMut(std::time::Duration),
+{
+    drive_serve_rounds_with_limit(
+        reqs,
+        window,
+        MAX_CONSECUTIVE_THROTTLED_ROUNDS,
+        round_fn,
+        on_batch,
+        wait,
+    )
+}
+
+fn drive_serve_rounds_with_limit<R, W>(
+    reqs: &[GetMwebUtxos],
+    window: &mut usize,
+    max_stalled_rounds: u32,
     mut round_fn: R,
     on_batch: &mut dyn FnMut(MwebUtxos) -> Result<(), Error>,
     mut wait: W,
@@ -1146,7 +1323,7 @@ where
 
         if served_count == 0 {
             stalled_rounds += 1;
-            if stalled_rounds >= MAX_CONSECUTIVE_THROTTLED_ROUNDS {
+            if stalled_rounds >= max_stalled_rounds.max(1) {
                 return Err(throttled_error(unserved.len()));
             }
         } else {
